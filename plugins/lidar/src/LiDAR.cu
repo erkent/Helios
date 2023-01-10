@@ -1552,6 +1552,7 @@ void LiDARcloud::calculateLeafAreaGPU_testing( int min_voxel_hits){
     
 }
 
+
 void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool beamoutput, bool fillAnalytic  ){
     
     // calculates LAD using several different methods investigated in Kent & Bailey (2021)
@@ -1569,7 +1570,7 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
     }
     
     if( !hitgridcellcomputed ){
-      calculateHitGridCellGPU();
+        calculateHitGridCellGPU();
     }
     
     const uint Nscans = getScanCount();
@@ -1601,6 +1602,9 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
     
     std::vector<std::vector<float>>  P_equal_numerator_array(Ncells);
     std::vector<std::vector<float>>  P_equal_denominator_array(Ncells);
+    
+    std::vector<std::vector<float>>  P_ideal_numerator_array(Ncells);
+    std::vector<std::vector<float>>  P_ideal_denominator_array(Ncells);
     
     std::vector<std::vector<float>>  P_intensity_numerator_array(Ncells);
     std::vector<std::vector<float>>  P_intensity_denominator_array(Ncells);
@@ -1726,7 +1730,7 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
                 // set up header of file that outputs one row for each beam in the current scan that interacts with the current voxel
                 
                 file_beam.open("../beamoutput/beam_data_s_" + std::to_string(s) + "_c_" + std::to_string(c) + ".txt");
-                file_beam << "scan, cell, beam, R_before, R_inside, R_after, R_miss, E_before, E_inside, E_after, E_miss, sin_theta, dr, last_dr"  << std::endl;
+                file_beam << "scan, cell, beam, R_before, R_inside, R_after, R_miss, E_before, E_inside, E_after, E_miss, sin_theta, dr, last_dr, I_before, I_inside, I_after, I_miss"  << std::endl;
             }
             
             //load the attributes of the grid cell
@@ -1767,6 +1771,8 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
             float P_equal_denominator = 0;
             float P_intensity_numerator = 0;
             float P_intensity_denominator = 0;
+            float P_ideal_numerator = 0;
+            float P_ideal_denominator = 0;
             float P_exact_numerator = 0;
             float P_exact_denominator = 0;
             uint voxel_beam_count = 0;
@@ -1781,6 +1787,11 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
                 float R_inside = 0;
                 float R_after = 0;
                 float R_miss = 0;
+                
+                float I_before = 0;
+                float I_inside = 0;
+                float I_after = 0;
+                float I_miss = 0;
                 
                 float E_before = 0;
                 float E_inside = 0;
@@ -1807,18 +1818,22 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
                     
                     if(hit_location[i] == 1){
                         R_before = R_before +  getHitData(this_scan_index[i], "nRaysHit");
+                        I_before = I_before + getHitData(this_scan_index[i], "intensity");
                         E_before ++;
                     }else if(hit_location[i] == 2){
                         R_inside = R_inside +  getHitData(this_scan_index[i], "nRaysHit");
+                        I_inside = I_inside + getHitData(this_scan_index[i], "intensity");
                         E_inside ++;
                     }else if(hit_location[i] == 3){
                         R_after = R_after +  getHitData(this_scan_index[i], "nRaysHit");
+                        I_after = I_after + getHitData(this_scan_index[i], "intensity");
                         E_after ++;
                         if(getHitData(this_scan_index[i], "target_index") == 0){ // if this is the first hitpoint for this beam,
                             W = 1.0;
                         }
                     }else if(hit_location[i] == 4){
                         R_miss = R_miss +  getHitData(this_scan_index[i], "nRaysHit");
+                        I_miss = I_miss + getHitData(this_scan_index[i], "intensity");
                         E_miss ++;
                     } // or this hitpoint / beam did not intersect the voxel and should not be added to the total number of beams for this voxel
                     
@@ -1835,7 +1850,7 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
                 
                 if( beamoutput ){
                     // output info about the current beam to file
-                    file_beam << s << "," << c << "," << k << "," << R_before << "," << R_inside << "," << R_after << "," << R_miss << "," << E_before << "," << E_inside << "," << E_after << "," << E_miss << "," << sin_theta << "," << drrx << "," << last_drr << std::endl;
+                    file_beam << s << "," << c << "," << k << "," << R_before << "," << R_inside << "," << R_after << "," << R_miss << "," << E_before << "," << E_inside << "," << E_after << "," << E_miss << "," << sin_theta << "," << drrx << "," << last_drr << "," << I_before << "," << I_inside << "," << I_after << "," << I_miss << std::endl;
                 }
                 
                 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1848,11 +1863,20 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
                     voxel_beam_count++;
                 }
                 
+                // P_ideal
+                if(R_inside != 0 || R_after != 0){ // only count this beam for P_ideal if some energy hit inside or after the voxel (not including misses)
+                    P_ideal_numerator += (R_after / (R_before + R_inside + R_after))*sin_theta;
+                    P_ideal_denominator += ((R_inside + R_after) / (R_before + R_inside + R_after))*sin_theta;
+                }else if(R_inside == 0 && R_after == 0 && R_before == 0 && R_miss != 0){ // also count this beam if all the energy missed (but still went through the voxel)
+                    P_ideal_numerator += 1*sin_theta;
+                    P_ideal_denominator += 1*sin_theta;
+                }
+                
                 // P_intensity
-                if(R_inside != 0 || R_after != 0){ // only count this beam for P_intensity if some energy hit inside or after the voxel (not including misses)
-                    P_intensity_numerator += (R_after / (R_before + R_inside + R_after))*sin_theta;
-                    P_intensity_denominator += ((R_inside + R_after) / (R_before + R_inside + R_after))*sin_theta;
-                }else if(R_inside == 0 && R_after == 0 && R_before == 0 && R_miss != 0){ // also count this beam if all the energy missed (but still went throught the voxel)
+                if(I_inside != 0 || I_after != 0){ // only count this beam for P_intensity if some energy hit inside or after the voxel (not including misses)
+                    P_intensity_numerator += (I_after / (I_before + I_inside + I_after))*sin_theta;
+                    P_intensity_denominator += ((I_inside + I_after) / (I_before + I_inside + I_after))*sin_theta;
+                }else if(I_inside == 0 && I_after == 0 && I_before == 0 && I_miss != 0){ // also count this beam if all the energy missed (but still went through the voxel)
                     P_intensity_numerator += 1*sin_theta;
                     P_intensity_denominator += 1*sin_theta;
                 }
@@ -1901,6 +1925,9 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
             P_intensity_numerator_array.at(c).push_back(P_intensity_numerator);
             P_intensity_denominator_array.at(c).push_back(P_intensity_denominator);
             
+            P_ideal_numerator_array.at(c).push_back(P_ideal_numerator);
+            P_ideal_denominator_array.at(c).push_back(P_ideal_denominator);
+            
             P_exact_numerator_array.at(c).push_back(P_exact_numerator);
             P_exact_denominator_array.at(c).push_back(P_exact_denominator);
             
@@ -1935,6 +1962,7 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
     std::vector<float> P_sequal(Ncells);
     std::vector<float> P_equal(Ncells);
     std::vector<float> P_intensity(Ncells);
+    std::vector<float> P_ideal(Ncells);
     std::vector<float> P_exact(Ncells);
     std::vector<uint> voxel_beam_count_tot(Ncells);
     std::vector<float> dr_bar(Ncells);
@@ -1954,6 +1982,9 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
         
         float P_intensity_numerator_array_agg= 0;
         float P_intensity_denominator_array_agg= 0;
+        
+        float P_ideal_numerator_array_agg= 0;
+        float P_ideal_denominator_array_agg= 0;
         
         float P_exact_numerator_array_agg= 0;
         float P_exact_denominator_array_agg= 0;
@@ -1975,6 +2006,9 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
             P_intensity_numerator_array_agg += P_intensity_numerator_array.at(c).at(s);
             P_intensity_denominator_array_agg += P_intensity_denominator_array.at(c).at(s);
             
+            P_ideal_numerator_array_agg += P_ideal_numerator_array.at(c).at(s);
+            P_ideal_denominator_array_agg += P_ideal_denominator_array.at(c).at(s);
+            
             P_exact_numerator_array_agg += P_exact_numerator_array.at(c).at(s);
             P_exact_denominator_array_agg += P_exact_denominator_array.at(c).at(s);
             voxel_beam_count_array_agg += voxel_beam_count_array.at(c).at(s);
@@ -1985,6 +2019,7 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
         P_sequal[c] = P_sequal_numerator_array_agg / P_sequal_denominator_array_agg ;
         P_equal[c] = P_equal_numerator_array_agg / P_equal_denominator_array_agg ;
         P_intensity[c] = P_intensity_numerator_array_agg / P_intensity_denominator_array_agg ;
+        P_ideal[c] = P_ideal_numerator_array_agg / P_ideal_denominator_array_agg ;
         P_exact[c] = P_exact_numerator_array_agg / P_exact_denominator_array_agg ;
         voxel_beam_count_tot[c] = voxel_beam_count_array_agg;
         if( printmessages ){
@@ -1992,7 +2027,8 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
             std::cout << "Cell " << c << ", P_first = " << P_first[c] << std::endl;
             std::cout << "Cell " << c << ", P_sequal = " << P_sequal[c] << std::endl;
             std::cout << "Cell " << c << ", P_equal = " << P_equal[c] << std::endl;
-            std::cout << "Cell " << c << ", P_intensity = " << P_intensity[c] << std::endl;
+            std::cout << "Cell " << c << ", P_intensity = " << P_ideal[c] << std::endl;
+            std::cout << "Cell " << c << ", P_ideal = " << P_ideal[c] << std::endl;
             std::cout << "Cell " << c << ", P_exact = " << P_exact[c] << std::endl;
         }
         
@@ -2151,6 +2187,7 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
     std::vector<float> LAD_sequal_Gref = LAD_inversion(P_sequal, Gtheta_ref, dr_array, fillAnalytic);
     std::vector<float> LAD_equal_Gref = LAD_inversion(P_equal, Gtheta_ref, dr_array, fillAnalytic);
     std::vector<float> LAD_intensity_Gref = LAD_inversion(P_intensity, Gtheta_ref, dr_array, fillAnalytic);
+    std::vector<float> LAD_ideal_Gref = LAD_inversion(P_ideal, Gtheta_ref, dr_array, fillAnalytic);
     std::vector<float> LAD_exact_Gref = LAD_inversion(P_exact, Gtheta_ref, dr_array, fillAnalytic );
     
     // perform LAD inversion using triangulation-estimated Gtheta
@@ -2159,6 +2196,7 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
     std::vector<float> LAD_sequal = LAD_inversion(P_sequal, Gtheta, dr_array, fillAnalytic);
     std::vector<float> LAD_equal = LAD_inversion(P_equal, Gtheta, dr_array, fillAnalytic);
     std::vector<float> LAD_intensity = LAD_inversion(P_intensity, Gtheta, dr_array, fillAnalytic);
+    std::vector<float> LAD_ideal = LAD_inversion(P_ideal, Gtheta, dr_array, fillAnalytic);
     std::vector<float> LAD_exact = LAD_inversion(P_exact, Gtheta, dr_array, fillAnalytic);
     
     if( printmessages ){
@@ -2168,14 +2206,14 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
     // output the voxel level variables
     std::ofstream file_output;
     file_output.open("../voxeloutput/voxeloutput.txt");
-    file_output << "cell, grid_center_x, grid_center_y, grid_center_z, grid_size_x, grid_size_y, grid_size_z, Nbeams, LAD_ref, G_ref, dr_bar, dr_var, P_ref, G, P_first, P_sequal, P_equal, P_intensity, P_exact, LADGref_refcheck, LADGref_first, LADGref_sequal, LADGref_equal, LADGref_intensity, LADGref_exact, LAD_refcheck, LAD_first, LAD_sequal, LAD_equal, LAD_intensity, LAD_exact"  << std::endl;
+    file_output << "cell, grid_center_x, grid_center_y, grid_center_z, grid_size_x, grid_size_y, grid_size_z, Nbeams, LAD_ref, G_ref, dr_bar, dr_var, P_ref, G, P_first, P_sequal, P_equal, P_intensity, P_ideal, P_exact, LADGref_refcheck, LADGref_first, LADGref_sequal, LADGref_equal, LADGref_intensity, LADGref_ideal, LADGref_exact, LAD_refcheck, LAD_first, LAD_sequal, LAD_equal, LAD_intensity, LAD_ideal, LAD_exact"  << std::endl;
     
     for(uint c=0; c<Ncells; c++)
     {
         helios::vec3 grid_size = getCellSize(c);
         helios::vec3 grid_center = getCellCenter(c);
         
-        file_output << c << "," << grid_center.x << "," << grid_center.y << "," << grid_center.z << "," << grid_size.x << "," << grid_size.y << "," << grid_size.z << "," << voxel_beam_count_tot.at(c) << "," << LA_ref[c]/(grid_size.x*grid_size.y*grid_size.z) << "," << Gtheta_ref[c] << "," << dr_bar_ref[c] << "," << dr_var_ref[c] << "," << P_ref[c] << "," << Gtheta[c] << "," << P_first[c] << "," << P_sequal[c] << "," << P_equal[c] << "," << P_intensity[c] << "," << P_exact[c] << "," << LAD_refcheck_Gref[c] << "," << LAD_first_Gref[c] << "," << LAD_sequal_Gref[c] << "," << LAD_equal_Gref[c] << "," << LAD_intensity_Gref[c] << "," << LAD_exact_Gref[c] << "," << LAD_refcheck[c] << "," << LAD_first[c] << "," << LAD_sequal[c] << "," << LAD_equal[c] << "," << LAD_intensity[c] << "," << LAD_exact[c] << std::endl;
+        file_output << c << "," << grid_center.x << "," << grid_center.y << "," << grid_center.z << "," << grid_size.x << "," << grid_size.y << "," << grid_size.z << "," << voxel_beam_count_tot.at(c) << "," << LA_ref[c]/(grid_size.x*grid_size.y*grid_size.z) << "," << Gtheta_ref[c] << "," << dr_bar_ref[c] << "," << dr_var_ref[c] << "," << P_ref[c] << "," << Gtheta[c] << "," << P_first[c] << "," << P_sequal[c] << "," << P_equal[c] << ","  << P_intensity[c] << "," << P_ideal[c] << "," << P_exact[c] << "," << LAD_refcheck_Gref[c] << "," << LAD_first_Gref[c] << "," << LAD_sequal_Gref[c] << "," << LAD_equal_Gref[c] << "," << LAD_intensity_Gref[c] << "," << LAD_ideal_Gref[c] << "," << LAD_exact_Gref[c] << "," << LAD_refcheck[c] << "," << LAD_first[c] << "," << LAD_sequal[c] << "," << LAD_equal[c] << "," << LAD_intensity[c] << "," << LAD_ideal[c] << "," << LAD_exact[c] << std::endl;
     }
     file_output.close();
     
