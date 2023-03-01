@@ -94,6 +94,17 @@ class VoxelIntersection{
      */
     bool approxSame(helios::vec3 a, helios::vec3 b, float absTol);  
 
+    //! categorize primitives based on a voxel grid
+    /** \param[in] "UUIDs" vector of Unique universal identifiers (UUIDs) of primitives to be categorized
+     \param[in] "grid_center" coordinates of the center of the grid
+     \param[in] "grid_size" size of the grid in the x, y, z dimenions
+     \param[in] "grid_divisions" number of grid divisions in the x, y, and z dimensions
+     \return vector of UUIDs that were categorized as inside the voxel grid
+     \note the cell_primitives vector is also updated with the UUIDs of primitives in each cell
+     */
+    std::vector<uint> voxelGridIntersection(std::vector<uint> UUIDs, helios::vec3 grid_center, helios::vec3 grid_size, helios::int3 grid_divisions);
+        
+    
  private:
 
   helios::Context* context;

@@ -1569,3 +1569,125 @@ bool VoxelIntersection::approxSame(helios::vec3 a, helios::vec3 b, float absTol)
 {
     return fabs(a.x-b.x) <= absTol && fabs(a.y-b.y) <= absTol && fabs(a.z-b.z) <= absTol ;
 }
+
+
+std::vector<uint> VoxelIntersection::voxelGridIntersection(std::vector<uint> UUIDs, helios::vec3 grid_center, helios::vec3 grid_size, helios::int3 grid_divisions){
+
+    //set up the grid
+    std::vector<std::vector<helios::vec3>> grid_face_vertices;
+    helios::vec3 grid_min = make_vec3(grid_center.x - grid_size.x*0.5, grid_center.y - grid_size.y*0.5, grid_center.z - grid_size.z*0.5);
+    helios::vec3 grid_max = make_vec3(grid_center.x + grid_size.x*0.5, grid_center.y + grid_size.y*0.5, grid_center.z + grid_size.z*0.5);
+    helios::vec3 grid_spacing = make_vec3(grid_size.x/grid_divisions.x, grid_size.y/grid_divisions.y, grid_size.z/grid_divisions.z);
+    
+    //faces in the y-z plane (change x)
+    for(uint k=0;k< (grid_divisions.x + 1); k++)
+    {
+        std::vector<helios::vec3> this_face_vertices;
+        this_face_vertices.push_back(make_vec3(grid_min.x + k*grid_spacing.x, grid_min.y, grid_min.z));
+        this_face_vertices.push_back(make_vec3(grid_min.x + k*grid_spacing.x, grid_min.y, grid_max.z));
+        this_face_vertices.push_back(make_vec3(grid_min.x + k*grid_spacing.x, grid_max.y, grid_min.z));
+        this_face_vertices.push_back(make_vec3(grid_min.x + k*grid_spacing.x, grid_max.y, grid_max.z));
+        grid_face_vertices.push_back(this_face_vertices);
+    }
+    
+    //faces in the x-z plane (change y)
+    for(uint k=0;k< (grid_divisions.y + 1); k++)
+    {
+        std::vector<helios::vec3> this_face_vertices;
+        this_face_vertices.push_back(make_vec3(grid_min.x, grid_min.y + k*grid_spacing.y, grid_min.z));
+        this_face_vertices.push_back(make_vec3(grid_min.x, grid_min.y + k*grid_spacing.y, grid_max.z));
+        this_face_vertices.push_back(make_vec3(grid_max.x, grid_min.y + k*grid_spacing.y, grid_min.z));
+        this_face_vertices.push_back(make_vec3(grid_max.x, grid_min.y + k*grid_spacing.y, grid_max.z));
+        grid_face_vertices.push_back(this_face_vertices);
+    }
+    
+    //faces in the x-z plane (change y)
+    for(uint k=0;k< (grid_divisions.z + 1); k++)
+    {
+        std::vector<helios::vec3> this_face_vertices;
+        this_face_vertices.push_back(make_vec3(grid_min.x, grid_min.y, grid_min.z + k*grid_spacing.z));
+        this_face_vertices.push_back(make_vec3(grid_min.x, grid_max.y, grid_min.z + k*grid_spacing.z));
+        this_face_vertices.push_back(make_vec3(grid_max.x, grid_min.y, grid_min.z + k*grid_spacing.z));
+        this_face_vertices.push_back(make_vec3(grid_max.x, grid_max.y, grid_min.z + k*grid_spacing.z));
+        grid_face_vertices.push_back(this_face_vertices);
+    }
+    
+    if( printmessages ){
+        std::cout << UUIDs.size() << " input primitives" << std::endl;
+        std::cout << grid_face_vertices.size() << " grid faces used for categorization" << std::endl;
+        std::cout << grid_divisions.x*grid_divisions.y*grid_divisions.z << " total grid cells" << std::endl;
+    }
+    
+    
+    //initially set all UUIDs as -2 to check for errors later
+    context->setPrimitiveData(UUIDs, "cell_ID", int(-2));
+    
+    //clear cell_primitives
+    cell_primitives.clear();
+    cell_primitives.resize(grid_divisions.x*grid_divisions.y*grid_divisions.z + 1);
+    
+    std::vector<uint> inside_UUIDs;
+    
+    for(uint p=0;p<UUIDs.size();p++)
+    {
+        int cell_ID = 0;
+        bool flag = false;
+        
+        for(uint k=0;k< (grid_divisions.z); k++)
+        {
+            for(uint j=0;j< (grid_divisions.y); j++)
+            {
+                for(uint i=0;i< (grid_divisions.x); i++)
+                {
+                    
+                    helios::vec3 cell_min = make_vec3(grid_min.x + i*grid_spacing.x, grid_min.y + j*grid_spacing.y, grid_min.z + k*grid_spacing.z);
+                    helios::vec3 cell_max = make_vec3(grid_min.x + i*grid_spacing.x + grid_spacing.x, grid_min.y + j*grid_spacing.y + grid_spacing.y, grid_min.z + k*grid_spacing.z + grid_spacing.z);
+                    
+                    std::vector<helios::vec3> verts = context->getPrimitiveVertices(UUIDs.at(p));
+                    uint v_in = 0;
+                    for(uint v=0;v<verts.size();v++)
+                    {
+                        float absTol = pow(10, -6);
+                        float relTol = pow(10, -20);
+                        bool test2_x = (verts.at(v).x > cell_min.x || approxSame(verts.at(v).x, cell_min.x, absTol, relTol)) && (verts.at(v).x < cell_max.x || approxSame(verts.at(v).x, cell_max.x, absTol, relTol));
+                        bool test2_y = (verts.at(v).y > cell_min.y || approxSame(verts.at(v).y, cell_min.y, absTol, relTol)) && (verts.at(v).y < cell_max.y || approxSame(verts.at(v).y, cell_max.y, absTol, relTol));
+                        bool test2_z =  (verts.at(v).z > cell_min.z || approxSame(verts.at(v).z, cell_min.z, absTol, relTol)) && (verts.at(v).z < cell_max.z || approxSame(verts.at(v).z, cell_max.z, absTol, relTol)) ;
+                        
+                        if( test2_x && test2_y && test2_z)
+                        {
+                            v_in ++;
+                        }
+                    }
+                    
+                    if(v_in == verts.size())
+                    {
+                        context->setPrimitiveData(UUIDs.at(p), "cell_ID", cell_ID);
+                        cell_primitives.at(cell_ID).push_back(UUIDs.at(p));
+                        inside_UUIDs.push_back(UUIDs.at(p));
+                        cell_ID ++;
+                        flag = true;
+                        break;
+                    }
+                    cell_ID ++;
+                }
+                if(flag == true){break;}
+            }
+            if(flag == true){break;}
+        }
+        
+        if(flag == false){
+            cell_primitives.at(cell_primitives.size()-1).push_back(UUIDs.at(p));
+            context->setPrimitiveData(UUIDs.at(p), "cell_ID", -1);
+        }
+        
+    }
+    
+    std::cout << "Number of primitives categorized as inside the grid = " << inside_UUIDs.size() << std::endl;
+    std::cout << "Number of primitives categorized as outside the grid = " << UUIDs.size() - inside_UUIDs.size() << std::endl;
+    
+    return inside_UUIDs;
+    
+        
+}
+
+
