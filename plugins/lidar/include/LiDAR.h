@@ -869,6 +869,18 @@ class LiDARcloud{
    * \param[in] "max_aspect_ratio" Maximum allowable aspect ratio of triangles.
   */
   void triangulateHitPoints( float Lmax, float max_aspect_ratio );
+  
+  //ERK
+  //! Perform triangulation on hit points in point cloud that meet some filtering criteria based on scalar data
+  /**
+   * \param[in] "Lmax" Maximum allowable length of triangle sides.
+   * \param[in] "max_aspect_ratio" Maximum allowable aspect ratio of triangles.
+   * * \param[in] "scalar_field" Name of a scalar field defined in the ASCII point cloud data (e.g., "deviation")
+   * \param[in] "threshold" Value for filter threshold
+   * \param[in] "comparator" Points will not be used in triangulation if "scalar (comparator) threshold", where (comparator) is one of ">", "<", or "="
+   * \note As an example, imagine we wanted to remove all hit points where the deviation is greater than 15 for the purposes of the triangulation. In this case we would call triangulateHitPoints(Lmax, max_aspect_ratio, "deviation", 15, ">" );
+   */
+  void triangulateHitPoints( float Lmax, float max_aspect_ratio );
 
   //! Add triangle geometry to Helios context
   /**
