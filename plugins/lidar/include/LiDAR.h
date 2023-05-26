@@ -880,7 +880,7 @@ class LiDARcloud{
    * \param[in] "comparator" Points will not be used in triangulation if "scalar (comparator) threshold", where (comparator) is one of ">", "<", or "="
    * \note As an example, imagine we wanted to remove all hit points where the deviation is greater than 15 for the purposes of the triangulation. In this case we would call triangulateHitPoints(Lmax, max_aspect_ratio, "deviation", 15, ">" );
    */
-  void triangulateHitPoints( float Lmax, float max_aspect_ratio );
+  void triangulateHitPoints( float Lmax, float max_aspect_ratio, const char* scalar_field, float threshold, const char* comparator );
 
   //! Add triangle geometry to Helios context
   /**
