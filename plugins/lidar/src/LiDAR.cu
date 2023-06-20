@@ -777,11 +777,17 @@ std::vector<helios::vec3> LiDARcloud::gapfillMisses(uint source, const bool gapf
         theta_range = getScanRangeTheta(source); // use ranges from xml file
     }
     
+    std::cout << "theta_range chosen"  << std::endl;
+    
+    std::cout << "theta_range chosen"  << std::endl;
+    
+    
+    
     for( int j=0; j<hit_table2D.size(); j++ ){
         
         //upward edge points
         if( hit_table2D.at(j).front().at(2)>theta_range.x ){
-            
+            std::cout << "upward edge point j =" << j << std::endl;
             float dtheta = dtheta_avg;
             float theta = hit_table2D.at(j).at(0).at(2) - dtheta;
             //just use the the last value of phi in the sweep
@@ -817,7 +823,7 @@ std::vector<helios::vec3> LiDARcloud::gapfillMisses(uint source, const bool gapf
         //downward edge points
         //ERK changed .x to .y here
         if( hit_table2D.at(j).back().at(2)<theta_range.y ){
-            
+            std::cout << "downward edge point j =" << j << std::endl;
             int sz = hit_table2D.at(j).size();
             // same concept as above for downward edge points
             float dtheta = dtheta_avg;
@@ -843,6 +849,8 @@ std::vector<helios::vec3> LiDARcloud::gapfillMisses(uint source, const bool gapf
                 
             }
         }
+        
+        std::cout << "xyz_filled.size()" << xyz_filled.size() << std::endl;
         
     }
     
