@@ -679,6 +679,10 @@ std::vector<helios::vec3> LiDARcloud::gapfillMisses(uint source, const bool gapf
     std::cout << "dt_avg for extrapolation: " << dt_avg << std::endl;
     std::cout << "dtheta_avg for extrapolation: " << dtheta_avg << std::endl;
     
+    std::cout << "hit_table2D.size() = " << hit_table2D.size() << std::endl;
+    
+    
+    
     //identify gaps and fill
     for( int j=0; j<hit_table2D.size(); j++ ){
         for( int i=0; i<hit_table2D.at(j).size()-1; i++ ){
@@ -718,6 +722,10 @@ std::vector<helios::vec3> LiDARcloud::gapfillMisses(uint source, const bool gapf
                 }
             }
         }
+        std::cout << "xyz_filled.size() = " << xyz_filled.size() << std::endl;
+        std::cout << "getHitCount() = " << getHitCount() << std::endl;
+        
+        
     }
     uint npointsfilled = xyz_filled.size();
     std::cout << "# of points filled =  " << npointsfilled << std::endl;
@@ -779,10 +787,7 @@ std::vector<helios::vec3> LiDARcloud::gapfillMisses(uint source, const bool gapf
     
     std::cout << "theta_range chosen"  << std::endl;
     
-    std::cout << "theta_range chosen"  << std::endl;
-    
-    
-    
+   
     for( int j=0; j<hit_table2D.size(); j++ ){
         
         //upward edge points
