@@ -798,6 +798,14 @@ std::string getFilePath( const std::string &filepath, bool trailingslash = true 
  */
 std::vector<float> importVectorFromFile(const std::string &filepath);
 
+//! Write a one-dimensional vector of floats to a text file
+/**
+ * \param[in] "vec" Path to text file
+ * \param[in] "filepath" Path to text file
+ */
+void exportVectorToFile(const std::vector<float> vec, const std::string &filepath);
+
+
 
 extern SphericalCoord nullrotation;
 extern vec3 nullorigin;

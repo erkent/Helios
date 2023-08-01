@@ -2883,3 +2883,21 @@ std::vector<float> helios::importVectorFromFile(const std::string &filepath){
   return vec;
 
 }
+
+void helios::exportVectorToFile(const std::vector<float> vec, const std::string &filepath){
+    
+    std::ofstream file;
+    
+    file.open(filepath.c_str());
+    
+    if( !file.is_open() ){
+        throw(std::runtime_error("ERROR (helios::exportVectorToFile): File " + filepath + " could not be opened for writing. Check that you have permission to write it."));
+    }
+    
+    for( uint i=0; i<vec.size(); i++ ){
+        file << vec.at(i) << std::endl;
+    }
+    
+    file.close();
+    
+}
