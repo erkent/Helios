@@ -2022,7 +2022,12 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
         if(I_inside != 0 || I_after != 0){ // only count this beam for P_intensity if some energy hit inside or after the voxel (not including misses)
           P_intensity_numerator += (I_after / (I_before + I_inside + I_after))*sin_theta;
           P_intensity_denominator += ((I_inside + I_after) / (I_before + I_inside + I_after))*sin_theta;
-        }else if(I_inside == 0 && I_after == 0 && I_before == 0 && I_miss != 0){ // also count this beam if all the energy missed (but still went through the voxel)
+       // }else if(I_inside == 0 && I_after == 0 && I_before == 0 && I_miss != 0){ // also count this beam if all the energy missed (but still went through the voxel)
+        // This change was made in response to a change in [1.2.60] 2023-06-03 that set the intensity of miss points to zero
+        // it was causing total misses not to be counted at all for the intensity method. 
+        // this caused large underestimates of transmission and large overestimates of LAD
+        // so here we check if there is a miss hitpoint instead of non-zero miss intensity (which is zero now)
+        }else if(I_inside == 0 && I_after == 0 && I_before == 0 && E_miss != 0){ // also count this beam if all the energy missed (but still went through the voxel)
           P_intensity_numerator += 1*sin_theta;
           P_intensity_denominator += 1*sin_theta;
         }
