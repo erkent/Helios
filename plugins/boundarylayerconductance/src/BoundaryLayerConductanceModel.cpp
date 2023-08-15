@@ -136,7 +136,8 @@ void BLConductanceModel::run(const std::vector<uint> &UUIDs ){
   for( uint p=0; p<UUIDs.size(); p++ ){
 
       uint UUID = UUIDs.at(p);
-
+      //ERK
+      std::cout << "UUID inside BLC = " << UUID << std::endl;
     float U;
     if( context->doesPrimitiveDataExist( UUID, "wind_speed" ) ){
       context->getPrimitiveData( UUID, "wind_speed", U );
@@ -173,9 +174,9 @@ void BLConductanceModel::run(const std::vector<uint> &UUIDs ){
 
     //Number of primitive faces
     char Nsides = 2; //default is 2
-    if( context->doesPrimitiveDataExist(p,"twosided_flag") && context->getPrimitiveDataType(p,"twosided_flag")==HELIOS_TYPE_UINT ){
+    if( context->doesPrimitiveDataExist(UUID,"twosided_flag") && context->getPrimitiveDataType(UUID,"twosided_flag")==HELIOS_TYPE_UINT ){
       uint flag;
-      context->getPrimitiveData(p,"twosided_flag",flag);
+      context->getPrimitiveData(UUID,"twosided_flag",flag);
       if( flag==0 ){
         Nsides=1;
       }
