@@ -2051,7 +2051,7 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
         }
         
         // P_first
-        if(E_before == 0 && (E_inside != 0 || E_after != 0)){ // only count for P_sequal if some hit points were inside or after the voxel
+        if(E_before == 0 && (E_inside != 0 || E_after != 0)){ // only count for P_first if some hit points were inside or after the voxel
           P_first_numerator += W*sin_theta;
           P_first_denominator += 1*sin_theta;
         }else if(E_inside == 0 && E_after == 0 && E_before == 0 && E_miss != 0){ // also count this beam if there is only a "hitpoint" that missed (far after the voxel)
@@ -6156,6 +6156,1297 @@ void LiDARcloud::syntheticScan_Tpd_alt( helios::Context* context, int rays_per_p
         }
         
       }
+      
+      float average=0;
+      for( size_t hit=0; hit<t_hit.size(); hit++ ){
+        average+=t_hit.at(hit).at(0)/float(t_hit.size());
+      }
+      
+      for( size_t hit=0; hit<t_hit.size(); hit++ ){
+        
+        std::map<std::string,double> data;
+        data["target_index"] = hit;
+        data["target_count"] = t_hit.size();
+        data["deviation"] = fabs(t_hit.at(hit).at(0)-average);
+        data["timestamp"] = pulse_scangrid_ij.at(r).y*Ntheta+pulse_scangrid_ij.at(r).x;
+        data["intensity"] = t_hit.at(hit).at(1);
+        data["distance"] = t_hit.at(hit).at(0);
+        data["nRaysHit"] = t_hit.at(hit).at(2);
+        
+        float UUID = t_hit.at(hit).at(3);
+        if( UUID>=0 && UUID<ID_mapping.size() ){
+          UUID = ID_mapping.at(int(t_hit.at(hit).at(3)));
+        }
+        
+        helios::RGBcolor color = helios::RGB::red;
+        
+        if( UUID>=0 && context->doesPrimitiveExist(uint(UUID)) ){
+          
+          color = context->getPrimitiveColor(uint(UUID));
+          
+          if( context->doesPrimitiveDataExist(uint(UUID),"object_label") && context->getPrimitiveDataType(uint(UUID),"object_label")==helios::HELIOS_TYPE_INT ){
+            int label;
+            context->getPrimitiveData(uint(UUID),"object_label",label);
+            data["object_label"] = double(label);
+          }
+          
+          if( context->doesPrimitiveDataExist(uint(UUID),"reflectivity_lidar") && context->getPrimitiveDataType(uint(UUID),"reflectivity_lidar")==helios::HELIOS_TYPE_FLOAT ){
+            float rho;
+            context->getPrimitiveData(uint(UUID),"reflectivity_lidar",rho);
+            data.at("intensity")*=rho;
+          }
+          
+        }
+        
+        helios::vec3 dir = helios::make_vec3(direction[r].x,direction[r].y,direction[r].z);
+        helios::vec3 origin = helios::make_vec3(scan_origin.x,scan_origin.y,scan_origin.z);
+        helios::vec3 p = origin+dir*t_hit.at(hit).at(0);
+        addHitPoint( s, p, helios::cart2sphere(dir), color, data );
+        
+        Nhits++;
+      }
+      
+    }
+    
+    CUDA_CHECK_ERROR( cudaFree(d_hit_t) );
+    CUDA_CHECK_ERROR( cudaFree(d_hit_fnorm) );
+    CUDA_CHECK_ERROR( cudaFree(d_hit_ID) );
+    CUDA_CHECK_ERROR( cudaFree(d_raydir) );
+    free(hit_xyz);
+    free(direction);
+    free(hit_t);
+    free(hit_fnorm);
+    free(hit_ID);
+    
+    if( printmessages ){
+      std::cout << "Created synthetic scan #" << s << " with " << Nhits << " hit points." << std::endl;
+    }
+    
+  }
+  
+  CUDA_CHECK_ERROR( cudaFree(d_patch_vertex) );
+  CUDA_CHECK_ERROR( cudaFree(d_patch_textureID) );
+  CUDA_CHECK_ERROR( cudaFree(d_patch_uv) );
+  CUDA_CHECK_ERROR( cudaFree(d_tri_vertex) );
+  CUDA_CHECK_ERROR( cudaFree(d_tri_textureID) );
+  CUDA_CHECK_ERROR( cudaFree(d_tri_uv) );
+  CUDA_CHECK_ERROR( cudaFree(d_maskdata) );
+  CUDA_CHECK_ERROR( cudaFree(d_masksize) );
+  free(patch_vertex);
+  free(patch_textureID);
+  free(patch_uv);
+  free(tri_vertex);
+  free(tri_textureID);
+  free(tri_uv);
+  free(maskdata);
+  free(masksize);
+  
+  if( printmessages ){
+    std::cout << "done." << std::endl;
+  }
+  
+}
+
+void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per_pulse, float pulse_distance_threshold, bool scan_grid_only, bool record_misses ){
+  
+  int Npulse;
+  if( rays_per_pulse<1 ){
+    Npulse=1;
+  }else{
+    Npulse=rays_per_pulse;
+  }
+  
+  if( printmessages ){
+    if( Npulse>1 ){
+      std::cout << "Performing full-waveform synthetic LiDAR scan..." << std::endl;
+    }else{
+      std::cout << "Performing discrete return synthetic LiDAR scan..." << std::endl;
+    }
+  }
+  
+  if(getScanCount() ==0 ){
+    std::cout << "WARNING (syntheticScan): No scans added to the point cloud. Exiting.." << std::endl;
+    return;
+  }
+  
+  float miss_distance = 1e5;  //arbitrary distance from scanner for 'miss' points
+  
+  float3 bb_center;
+  float3 bb_size;
+  
+  if(scan_grid_only == false){
+    
+    //Determine bounding box for Context geometry
+    helios::vec2 xbounds, ybounds, zbounds;
+    context->getDomainBoundingBox(xbounds,ybounds,zbounds);
+    bb_center = make_float3(xbounds.x+0.5*(xbounds.y-xbounds.x),ybounds.x+0.5*(ybounds.y-ybounds.x),zbounds.x+0.5*(zbounds.y-zbounds.x));
+    bb_size = make_float3(xbounds.y-xbounds.x,ybounds.y-ybounds.x,zbounds.y-zbounds.x);
+    
+  }else{
+    
+    // Determine bounding box for voxels instead of whole domain
+    helios::vec3 boxmin, boxmax;
+    getGridBoundingBox(boxmin, boxmax);  
+    bb_center = make_float3(boxmin.x + 0.5*(boxmax.x-boxmin.x),boxmin.y + 0.5*(boxmax.y-boxmin.y),boxmin.z + 0.5*(boxmax.z-boxmin.z) );
+    bb_size = make_float3(boxmax.x-boxmin.x, boxmax.y-boxmin.y, boxmax.z-boxmin.z );
+    
+  }
+  
+  //get geometry information and copy to GPU
+  
+  size_t c=0;
+  
+  std::map<std::string,int> textures;
+  std::map<std::string,int2> texture_size;
+  std::map<std::string,std::vector<std::vector<bool> > > texture_data;
+  int tID = 0;
+  
+  std::vector<uint> UUIDs_all = context->getAllUUIDs();
+  
+  std::vector<uint> ID_mapping;
+  
+  //----- PATCHES ----- //
+  
+  //figure out how many patches
+  size_t Npatches = 0;
+  for( int p=0; p<UUIDs_all.size(); p++ ){
+    if( context->getPrimitiveType(UUIDs_all.at(p)) == helios::PRIMITIVE_TYPE_PATCH ){
+      Npatches++;
+    }
+  }
+  
+  ID_mapping.resize(Npatches);
+  
+  float3* patch_vertex = (float3*)malloc(4*Npatches * sizeof(float3)); //allocate host memory
+  int* patch_textureID = (int*)malloc(Npatches * sizeof(int)); //allocate host memory
+  float2* patch_uv = (float2*)malloc(2*Npatches * sizeof(float2)); //allocate host memory
+  
+  c=0;
+  for( int p=0; p<UUIDs_all.size(); p++ ){
+    uint UUID = UUIDs_all.at(p);
+    if( context->getPrimitiveType(UUID) == helios::PRIMITIVE_TYPE_PATCH ){
+      std::vector<helios::vec3> verts = context->getPrimitiveVertices(UUID);
+      patch_vertex[4*c] = vec3tofloat3(verts.at(0));
+      patch_vertex[4*c+1] = vec3tofloat3(verts.at(1));
+      patch_vertex[4*c+2] = vec3tofloat3(verts.at(2));
+      patch_vertex[4*c+3] = vec3tofloat3(verts.at(3));
+      
+      ID_mapping.at(c) = UUIDs_all.at(p);
+      
+      if( !context->getPrimitiveTextureFile(UUID).empty() && context->primitiveTextureHasTransparencyChannel(UUID) ){
+        std::string tex = context->getPrimitiveTextureFile(UUID);
+        std::map<std::string,int>::iterator it = textures.find(tex);
+        if( it != textures.end() ){ //texture already exits
+          patch_textureID[c] = textures.at(tex);
+        }else{ //new texture
+          patch_textureID[c] = tID;
+          textures[tex] = tID;
+          helios::int2 tsize = context->getPrimitiveTextureSize(UUID);
+          texture_size[tex] = make_int2(tsize.x,tsize.y);
+          texture_data[tex] = *context->getPrimitiveTextureTransparencyData(UUID);
+          tID++;
+        }
+        
+        std::vector<helios::vec2> uv = context->getPrimitiveTextureUV(UUID);
+        if( uv.size()==4 ){//custom uv coordinates
+          patch_uv[2*c] = vec2tofloat2(uv.at(1));
+          patch_uv[2*c+1] = vec2tofloat2(uv.at(3));
+        }else{//default uv coordinates
+          patch_uv[2*c] = make_float2(0,0);
+          patch_uv[2*c+1] = make_float2(1,1);
+        }
+        
+      }else{
+        patch_textureID[c]=-1;
+      }
+      
+      c++;
+    }
+  }
+  
+  float3* d_patch_vertex;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_patch_vertex,4*Npatches*sizeof(float3)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_patch_vertex, patch_vertex, 4*Npatches*sizeof(float3), cudaMemcpyHostToDevice) );
+  int* d_patch_textureID;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_patch_textureID,Npatches*sizeof(int)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_patch_textureID, patch_textureID, Npatches*sizeof(int), cudaMemcpyHostToDevice) );
+  float2* d_patch_uv;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_patch_uv, 2*Npatches*sizeof(float2)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_patch_uv, patch_uv, 2*Npatches*sizeof(float2), cudaMemcpyHostToDevice) );
+  
+  //----- TRIANGLES ----- //
+  
+  //figure out how many triangles
+  size_t Ntriangles = 0;
+  for( int p=0; p<UUIDs_all.size(); p++ ){
+    if( context->getPrimitiveType(UUIDs_all.at(p)) == helios::PRIMITIVE_TYPE_TRIANGLE ){
+      Ntriangles++;
+    }
+  }
+  
+  ID_mapping.resize(Npatches+Ntriangles);
+  
+  float3* tri_vertex = (float3*)malloc(3*Ntriangles * sizeof(float3)); //allocate host memory
+  int* tri_textureID = (int*)malloc(Ntriangles * sizeof(int)); //allocate host memory
+  float2* tri_uv = (float2*)malloc(3*Ntriangles * sizeof(float2)); //allocate host memory
+  
+  c=0;
+  for( int p=0; p<UUIDs_all.size(); p++ ){
+    uint UUID = UUIDs_all.at(p);
+    if( context->getPrimitiveType(UUID) == helios::PRIMITIVE_TYPE_TRIANGLE ){
+      std::vector<helios::vec3> verts = context->getPrimitiveVertices(UUID);
+      tri_vertex[3*c] = vec3tofloat3(verts.at(0));
+      tri_vertex[3*c+1] = vec3tofloat3(verts.at(1));
+      tri_vertex[3*c+2] = vec3tofloat3(verts.at(2));
+      
+      ID_mapping.at(Npatches+c) = UUIDs_all.at(p);
+      
+      if( !context->getPrimitiveTextureFile(UUID).empty() && context->primitiveTextureHasTransparencyChannel(UUID) ){
+        std::string tex = context->getPrimitiveTextureFile(UUID);
+        std::map<std::string,int>::iterator it = textures.find(tex);
+        if( it != textures.end() ){ //texture already exits
+          tri_textureID[c] = textures.at(tex);
+        }else{ //new texture
+          tri_textureID[c] = tID;
+          textures[tex] = tID;
+          helios::int2 tsize = context->getPrimitiveTextureSize(UUID);
+          texture_size[tex] = make_int2(tsize.x,tsize.y);
+          texture_data[tex] = *context->getPrimitiveTextureTransparencyData(UUID);
+          tID++;
+        }
+        
+        std::vector<helios::vec2> uv = context->getPrimitiveTextureUV(UUID);
+        assert( uv.size()==3 );
+        tri_uv[3*c] = vec2tofloat2(uv.at(0));
+        tri_uv[3*c+1] = vec2tofloat2(uv.at(1));
+        tri_uv[3*c+2] = vec2tofloat2(uv.at(2));
+        
+      }else{
+        tri_textureID[c]=-1;
+      }
+      
+      c++;
+    }
+  }
+  
+  float3* d_tri_vertex;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_tri_vertex,3*Ntriangles*sizeof(float3)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_tri_vertex, tri_vertex, 3*Ntriangles*sizeof(float3), cudaMemcpyHostToDevice) );
+  int* d_tri_textureID;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_tri_textureID, Ntriangles*sizeof(int)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_tri_textureID, tri_textureID, Ntriangles*sizeof(int), cudaMemcpyHostToDevice) );
+  float2* d_tri_uv;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_tri_uv,3*Ntriangles*sizeof(float2)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_tri_uv, tri_uv, 3*Ntriangles*sizeof(float2), cudaMemcpyHostToDevice) );
+  
+  //transfer texture data to GPU
+  const int Ntextures = textures.size();
+  
+  int2 masksize_max = make_int2(0,0);
+  for( std::map<std::string,int2>::iterator it=texture_size.begin(); it!=texture_size.end(); ++it ){
+    if( it->second.x>masksize_max.x ){
+      masksize_max.x=it->second.x;
+    }
+    if( it->second.y>masksize_max.y ){
+      masksize_max.y=it->second.y;
+    }
+  }
+  
+  bool* maskdata = (bool*)malloc(Ntextures*masksize_max.x*masksize_max.y * sizeof(bool)); //allocate host memory
+  int2* masksize = (int2*)malloc(Ntextures * sizeof(int2)); //allocate host memory
+  
+  for( std::map<std::string,int2>::iterator it=texture_size.begin(); it!=texture_size.end(); ++it ){
+    std::string texture_file = it->first;
+    
+    int ID = textures.at(texture_file); 
+    
+    masksize[ID] = it->second;
+    
+    int ind=0;
+    for( int j=0; j<masksize_max.y; j++ ){
+      for( int i=0; i<masksize_max.x; i++ ){
+        
+        if( i<texture_size.at(texture_file).x && j<texture_size.at(texture_file).y ){
+          maskdata[ID*masksize_max.x*masksize_max.y+ind] = texture_data.at(texture_file).at(j).at(i);
+        }else{
+          maskdata[ID*masksize_max.x*masksize_max.y+ind] = false;
+        }
+        ind++;
+      }
+    }
+  }
+  
+  bool* d_maskdata;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_maskdata, Ntextures*masksize_max.x*masksize_max.y * sizeof(bool)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_maskdata, maskdata, Ntextures*masksize_max.x*masksize_max.y * sizeof(bool), cudaMemcpyHostToDevice) );
+  int2* d_masksize;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_masksize, Ntextures * sizeof(int2)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_masksize, masksize, Ntextures * sizeof(int2), cudaMemcpyHostToDevice) );
+  
+  for( int s=0; s< getScanCount(); s++ ){
+    
+    float3 scan_origin = vec3tofloat3(getScanOrigin(s));
+    
+    int Ntheta = getScanSizeTheta(s);
+    int Nphi = getScanSizePhi(s);
+    
+    helios::vec2 thetarange = getScanRangeTheta(s);
+    float thetamin = thetarange.x;
+    float thetamax = thetarange.y;
+    helios::vec2 phirange = getScanRangePhi(s);
+    float phimin = phirange.x;
+    float phimax = phirange.y;
+    
+    std::vector<std::string> column_format = getScanColumnFormat(s);
+    
+    std::vector<helios::vec3> raydir;
+    raydir.resize(Ntheta*Nphi);
+    
+    for (uint j=0; j<Nphi; j++ ){
+      float phi = phimin+float(j)*(phimax-phimin)/float(Nphi);
+      for (uint i=0; i<Ntheta; i++ ){        
+        float theta_z = thetamin+float(i)*(thetamax-thetamin)/float(Ntheta);
+        float theta_elev = 0.5f*M_PI-theta_z;
+        helios::vec3 dir = sphere2cart(helios::make_SphericalCoord(1.f,theta_elev,phi));
+        raydir.at(Ntheta*j+i) = dir;
+      }
+    }
+    
+    size_t N = Ntheta*Nphi;
+    
+    float3* d_hit_xyz;
+    CUDA_CHECK_ERROR( cudaMalloc((void**)&d_hit_xyz,N*sizeof(float3)) ); //allocate device memory
+    
+    //copy scan data into the host buffer
+    float3* hit_xyz = (float3*)malloc(N * sizeof(float3)); //allocate host memory
+    for( std::size_t r=0; r<N; r++ ){
+      hit_xyz[r] = scan_origin+vec3tofloat3(raydir.at(r)*10000.f);
+    }
+    
+    //copy from host to device memory
+    CUDA_CHECK_ERROR( cudaMemcpy(d_hit_xyz, hit_xyz, N*sizeof(float3), cudaMemcpyHostToDevice) );
+    
+    uint* bb_hit = (uint*)malloc(N * sizeof(uint)); //allocate host memory
+    uint* d_bb_hit;
+    CUDA_CHECK_ERROR( cudaMalloc((void**)&d_bb_hit,N*sizeof(uint)) ); //allocate device memory
+    CUDA_CHECK_ERROR( cudaMemset( d_bb_hit, 0, N*sizeof(uint)) ); //initialize to zero, set equal to 1 if the ray is found to intersect bounding box
+    
+    //Launch kernel to determine which rays intersect bounding box
+    uint3 dimBlock = make_uint3( 512, 1, 1 );
+    uint3 dimGrid = make_uint3( ceil(float(N)/float(dimBlock.x)), 1, 1 );
+    intersectBoundingBox<<< dimGrid, dimBlock >>>( N, scan_origin, d_hit_xyz, bb_center, bb_size, d_bb_hit );
+    
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR( cudaPeekAtLastError() ); //if there was an error inside the kernel, it will show up here
+    
+    //copy hit flag back to host
+    CUDA_CHECK_ERROR( cudaMemcpy(bb_hit, d_bb_hit, N*sizeof(uint), cudaMemcpyDeviceToHost) );
+    
+    CUDA_CHECK_ERROR( cudaFree(d_hit_xyz) );
+    CUDA_CHECK_ERROR( cudaFree(d_bb_hit) );
+    
+    //determine how many rays hit the bounding box
+    N = 0;
+    float hit_out = 0;
+    for( int i=0; i<Ntheta*Nphi; i++ ){
+      if( bb_hit[i]==1 ){
+        N++;
+        helios::SphericalCoord dir = cart2sphere(raydir[i]);
+        hit_out += sin(dir.zenith);
+      }
+    }
+    
+    if( N==0 ){
+      std::cout << "WARNING: Synthetic rays did not hit any primitives." << std::endl;
+      return;
+    }
+    
+    //make a new array of ray directions for rays that hit bounding box
+    float3* direction = (float3*)malloc(N * sizeof(float3)); //allocate host memory
+    
+    std::vector<helios::int2> pulse_scangrid_ij(N);
+    
+    int count=0;
+    for( int i=0; i<Ntheta*Nphi; i++ ){
+      if( bb_hit[i]==1 ){
+        
+        direction[count] = vec3tofloat3(raydir.at(i));
+        
+        int jj = floor(i/Ntheta);
+        int ii = i-jj*Ntheta;
+        pulse_scangrid_ij[count] = helios::make_int2(ii,jj);
+        
+        count++;
+      }else if( record_misses && !scan_grid_only ){
+        
+        std::map<std::string,double> data;
+        data["target_index"] = 0;
+        data["target_count"] = 1;
+        data["deviation"] = 0;
+        data["timestamp"] = i;
+        data["intensity"] = 0;
+        data["distance"] = miss_distance;
+        data["nRaysHit"] = rays_per_pulse;
+        
+        helios::vec3 miss_xyz = getScanOrigin(s) + miss_distance*raydir.at(i);
+        
+        addHitPoint( s, miss_xyz, helios::cart2sphere(raydir.at(i)), helios::RGB::black, data );
+        
+      }
+    }
+    free(bb_hit);
+    
+    float3* d_raydir;
+    CUDA_CHECK_ERROR( cudaMalloc((void**)&d_raydir,N*sizeof(float3)) ); //allocate device memory
+    CUDA_CHECK_ERROR( cudaMemcpy(d_raydir, direction, N*sizeof(float3), cudaMemcpyHostToDevice) );
+    
+    //Distance to intersection
+    float* d_hit_t;
+    CUDA_CHECK_ERROR( cudaMalloc((void**)&d_hit_t,N*Npulse*sizeof(float)) ); //allocate device memory
+    float* hit_t = (float*)malloc(N*Npulse * sizeof(float)); //allocate host memory
+    for( int i=0; i<N*Npulse; i++ ){
+      hit_t[i] = miss_distance;
+    }
+    CUDA_CHECK_ERROR( cudaMemcpy(d_hit_t, hit_t, N*Npulse*sizeof(float), cudaMemcpyHostToDevice) );
+    
+    //Dot product of primitive normal and ray direction (for calculating intensity)
+    float* d_hit_fnorm;
+    CUDA_CHECK_ERROR( cudaMalloc((void**)&d_hit_fnorm,N*Npulse*sizeof(float)) ); //allocate device memory
+    float* hit_fnorm = (float*)malloc(N*Npulse * sizeof(float)); //allocate host memory
+    for( int i=0; i<N*Npulse; i++ ){
+      hit_fnorm[i] = 1e6;
+    }
+    CUDA_CHECK_ERROR( cudaMemcpy(d_hit_fnorm, hit_fnorm, N*Npulse*sizeof(float), cudaMemcpyHostToDevice) );
+    
+    //ID of intersected primitive
+    int* d_hit_ID;
+    CUDA_CHECK_ERROR( cudaMalloc((void**)&d_hit_ID,N*Npulse*sizeof(int)) ); //allocate device memory
+    int* hit_ID = (int*)malloc(N*Npulse * sizeof(int)); //allocate host memory
+    for( int i=0; i<N*Npulse; i++ ){
+      hit_ID[i] = 999999999;
+    }
+    CUDA_CHECK_ERROR( cudaMemcpy(d_hit_ID, hit_ID, N*Npulse*sizeof(float), cudaMemcpyHostToDevice) );
+    
+    float exit_diameter = getScanBeamExitDiameter(s);
+    float beam_divergence = getScanBeamDivergence(s);
+    
+    if( Npulse>1 ){
+      dimBlock = make_uint3( 128, 4, 1 );
+    }else{
+      dimBlock = make_uint3( 512, 1, 1 );
+    }
+    dimGrid = make_uint3( ceil(float(N)/float(dimBlock.x)), ceil(float(Npulse)/float(dimBlock.y)), 1 );
+    
+    //---- patch kernel ----//
+    intersectPatches<<< dimGrid, dimBlock >>>( N, Npulse, scan_origin, d_raydir, exit_diameter, beam_divergence, Npatches, d_patch_vertex, d_patch_textureID, Ntextures, d_masksize, masksize_max, d_maskdata, d_patch_uv, d_hit_t, d_hit_fnorm, d_hit_ID );
+    
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR( cudaPeekAtLastError() ); //if there was an error inside the kernel, it will show up here
+    
+    //---- triangle kernel ----//
+    intersectTriangles<<< dimGrid, dimBlock >>>( N, Npulse, scan_origin, d_raydir, exit_diameter, beam_divergence, Ntriangles, Npatches, d_tri_vertex, d_tri_textureID, Ntextures, d_masksize, masksize_max, d_maskdata, d_tri_uv, d_hit_t, d_hit_fnorm, d_hit_ID );
+    
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR( cudaPeekAtLastError() ); //if there was an error inside the kernel, it will show up here
+    
+    //copy back
+    CUDA_CHECK_ERROR( cudaMemcpy(hit_t, d_hit_t, N*Npulse*sizeof(float), cudaMemcpyDeviceToHost) );
+    CUDA_CHECK_ERROR( cudaMemcpy(hit_fnorm, d_hit_fnorm, N*Npulse*sizeof(float), cudaMemcpyDeviceToHost) );
+    CUDA_CHECK_ERROR( cudaMemcpy(hit_ID, d_hit_ID, N*Npulse*sizeof(int), cudaMemcpyDeviceToHost) );
+    
+    size_t Nhits = 0;
+    
+    // vector of distance values weighted by intensity
+    float bin_width = 0.01; // distance range of one bin
+    float max_distance = 1e6;
+    int nBins = int(max_distance/bin_width);
+    std::vector<float> histogram_values_intensity(nBins, 0);
+    std::vector<int> histogram_values_count(nBins, 0);
+    std::vector<uint> histogram_values_UUID(nBins, 999999);
+    
+    
+    //looping over beams
+    for( size_t r=0; r<N; r++ ){
+      
+      std::vector<std::vector<float> > t_pulse;
+      std::vector<std::vector<float> > t_hit;
+      std::vector<std::vector<float> > t_hit_initial;
+      std::fill(histogram_values_intensity.begin(), histogram_values_intensity.end(), 0.0);
+      std::fill(histogram_values_count.begin(), histogram_values_count.end(), 0);
+      std::fill(histogram_values_UUID.begin(), histogram_values_UUID.end(), 999999);
+      
+      
+      //looping over rays in each beam
+      for( size_t p=0; p<Npulse; p++ ){
+        
+        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1e6)
+        float i = hit_fnorm[r*Npulse+p]; //dot product between beam direction and primitive normal
+        float ID = float(hit_ID[r*Npulse+p]);   //ID of intersected primitive
+        
+        if( record_misses || (!record_misses && t<miss_distance ) ){
+          std::vector<float> v{t,i,ID};
+          t_pulse.push_back(v);
+        }
+        
+      }
+      
+      if( t_pulse.size()==1 ){ //this is discrete-return data, or we only had one hit for this pulse
+        
+        float distance = t_pulse.front().at(0);
+        float intensity = t_pulse.front().at(1);
+        if( distance>=0.98f*miss_distance ){
+          intensity=0;
+        }
+        float nPulseHit = 1;
+        float IDmap = t_pulse.front().at(2);
+        
+        std::vector<float> v{distance,intensity,nPulseHit,IDmap};
+        t_hit.push_back( v );
+        
+      }else if( t_pulse.size()>1 ){ //more than one hit for this pulse
+        
+        // std::cout << "start changes" << std::endl;
+        
+        std::sort( t_pulse.begin(), t_pulse.end(), LIDAR_CUDA::sortcol0 );
+       
+       //loop over rays in this beam and group into bins
+       for( size_t hit=0; hit<t_pulse.size(); hit++ ){
+         float d=t_pulse.at(hit).at(0);
+         float f=t_pulse.at(hit).at(1);
+         for(uint hh=0;hh<histogram_values_count.size();hh++)
+         {
+           float current_beam_start_distance = bin_width*float(hh);
+           if(d < current_beam_start_distance)
+           {
+             histogram_values_intensity.at(hh) = histogram_values_intensity.at(hh) + f;
+             histogram_values_count.at(hh) = histogram_values_count.at(hh) + 1;
+             histogram_values_UUID.at(hh) = t_pulse.at(hit).at(2);
+             
+             break;
+           }
+         }
+       }
+       
+       // find peaks in the histogram
+       // these are the indices of histogram_values_intensity
+       std::vector<uint> peaks = peakFinder(histogram_values_intensity);
+       std::vector<uint> split_points_temp;
+       std::vector<uint> split_points;
+       split_points_temp.resize(peaks.size() - 1);
+       
+       // now find the minimum values of intensity between adjacent peaks
+       // these will be used as break/split points in deciding which histogram "bars" to group into which hit points
+       for(uint pk=0;pk<(peaks.size()-1);pk++)
+       {
+         //get the values from one peak to the next
+         std::vector<float> interval_values{histogram_values_intensity.begin() + peaks.at(pk), histogram_values_intensity.begin() + peaks.at(pk+1)};
+         // find the first element of the interval_values vector that has the minimum value of intensity
+         split_points_temp.at(pk) = std::distance(std::begin(interval_values), std::min_element(std::begin(interval_values), std::end(interval_values)));
+         
+         // add this index to the index of the peak to get the index of histogram_values_intensity
+         split_points.push_back(split_points_temp.at(pk) + peaks.at(pk));
+         
+       }
+       // add the last element
+       split_points.push_back(histogram_values_intensity.size()-1);
+       
+       std::vector<uint> split_points_start = split_points;
+       split_points_start.insert (split_points_start.begin(), 0);
+ 
+       // loop through the split points
+       for(uint sp=0;sp<split_points.size();sp++)
+       {
+         float hp_intensity = 0;
+         int hp_raycount = 0;
+         for(uint iii=split_points_start.at(sp);iii < split_points.at(sp);iii++)
+         {
+           hp_intensity = hp_intensity +  histogram_values_intensity.at(iii);
+           hp_raycount = hp_raycount +  histogram_values_count.at(iii);
+         }
+
+         float distance = bin_width*peaks.at(sp);
+         float intensity = hp_intensity/Npulse;
+         float nPulseHit = float(hp_raycount);
+         float IDmap = histogram_values_UUID.at(peaks.at(sp));
+         std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+         t_hit_initial.push_back( v );
+       } 
+      }
+      
+      // initial grouping is done.
+      // now see if we need to merge any hits
+      
+      float d0 = t_hit_initial.at(0).at(0);
+      float f0 = t_hit_initial.at(0).at(1);
+      float nr = float(t_hit_initial.at(0).at(2));
+      
+      t_hit = t_hit_initial;
+      
+      float average=0;
+      for( size_t hit=0; hit<t_hit.size(); hit++ ){
+        average+=t_hit.at(hit).at(0)/float(t_hit.size());
+      }
+      
+      for( size_t hit=0; hit<t_hit.size(); hit++ ){
+        
+        std::map<std::string,double> data;
+        data["target_index"] = hit;
+        data["target_count"] = t_hit.size();
+        data["deviation"] = fabs(t_hit.at(hit).at(0)-average);
+        data["timestamp"] = pulse_scangrid_ij.at(r).y*Ntheta+pulse_scangrid_ij.at(r).x;
+        data["intensity"] = t_hit.at(hit).at(1);
+        data["distance"] = t_hit.at(hit).at(0);
+        data["nRaysHit"] = t_hit.at(hit).at(2);
+        
+        float UUID = t_hit.at(hit).at(3);
+        if( UUID>=0 && UUID<ID_mapping.size() ){
+          UUID = ID_mapping.at(int(t_hit.at(hit).at(3)));
+        }
+        
+        helios::RGBcolor color = helios::RGB::red;
+        
+        if( UUID>=0 && context->doesPrimitiveExist(uint(UUID)) ){
+          
+          color = context->getPrimitiveColor(uint(UUID));
+          
+          if( context->doesPrimitiveDataExist(uint(UUID),"object_label") && context->getPrimitiveDataType(uint(UUID),"object_label")==helios::HELIOS_TYPE_INT ){
+            int label;
+            context->getPrimitiveData(uint(UUID),"object_label",label);
+            data["object_label"] = double(label);
+          }
+          
+          if( context->doesPrimitiveDataExist(uint(UUID),"reflectivity_lidar") && context->getPrimitiveDataType(uint(UUID),"reflectivity_lidar")==helios::HELIOS_TYPE_FLOAT ){
+            float rho;
+            context->getPrimitiveData(uint(UUID),"reflectivity_lidar",rho);
+            data.at("intensity")*=rho;
+          }
+          
+        }
+        
+        helios::vec3 dir = helios::make_vec3(direction[r].x,direction[r].y,direction[r].z);
+        helios::vec3 origin = helios::make_vec3(scan_origin.x,scan_origin.y,scan_origin.z);
+        helios::vec3 p = origin+dir*t_hit.at(hit).at(0);
+        addHitPoint( s, p, helios::cart2sphere(dir), color, data );
+        
+        Nhits++;
+      }
+      
+    }
+    
+    CUDA_CHECK_ERROR( cudaFree(d_hit_t) );
+    CUDA_CHECK_ERROR( cudaFree(d_hit_fnorm) );
+    CUDA_CHECK_ERROR( cudaFree(d_hit_ID) );
+    CUDA_CHECK_ERROR( cudaFree(d_raydir) );
+    free(hit_xyz);
+    free(direction);
+    free(hit_t);
+    free(hit_fnorm);
+    free(hit_ID);
+    
+    if( printmessages ){
+      std::cout << "Created synthetic scan #" << s << " with " << Nhits << " hit points." << std::endl;
+    }
+    
+  }
+  
+  CUDA_CHECK_ERROR( cudaFree(d_patch_vertex) );
+  CUDA_CHECK_ERROR( cudaFree(d_patch_textureID) );
+  CUDA_CHECK_ERROR( cudaFree(d_patch_uv) );
+  CUDA_CHECK_ERROR( cudaFree(d_tri_vertex) );
+  CUDA_CHECK_ERROR( cudaFree(d_tri_textureID) );
+  CUDA_CHECK_ERROR( cudaFree(d_tri_uv) );
+  CUDA_CHECK_ERROR( cudaFree(d_maskdata) );
+  CUDA_CHECK_ERROR( cudaFree(d_masksize) );
+  free(patch_vertex);
+  free(patch_textureID);
+  free(patch_uv);
+  free(tri_vertex);
+  free(tri_textureID);
+  free(tri_uv);
+  free(maskdata);
+  free(masksize);
+  
+  if( printmessages ){
+    std::cout << "done." << std::endl;
+  }
+  
+}
+
+void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays_per_pulse, float pulse_distance_threshold, bool scan_grid_only, bool record_misses ){
+  
+  int Npulse;
+  if( rays_per_pulse<1 ){
+    Npulse=1;
+  }else{
+    Npulse=rays_per_pulse;
+  }
+  
+  if( printmessages ){
+    if( Npulse>1 ){
+      std::cout << "Performing full-waveform synthetic LiDAR scan..." << std::endl;
+    }else{
+      std::cout << "Performing discrete return synthetic LiDAR scan..." << std::endl;
+    }
+  }
+  
+  if(getScanCount() ==0 ){
+    std::cout << "WARNING (syntheticScan): No scans added to the point cloud. Exiting.." << std::endl;
+    return;
+  }
+  
+  float miss_distance = 1e5;  //arbitrary distance from scanner for 'miss' points
+  
+  float3 bb_center;
+  float3 bb_size;
+  
+  if(scan_grid_only == false){
+    
+    //Determine bounding box for Context geometry
+    helios::vec2 xbounds, ybounds, zbounds;
+    context->getDomainBoundingBox(xbounds,ybounds,zbounds);
+    bb_center = make_float3(xbounds.x+0.5*(xbounds.y-xbounds.x),ybounds.x+0.5*(ybounds.y-ybounds.x),zbounds.x+0.5*(zbounds.y-zbounds.x));
+    bb_size = make_float3(xbounds.y-xbounds.x,ybounds.y-ybounds.x,zbounds.y-zbounds.x);
+    
+  }else{
+    
+    // Determine bounding box for voxels instead of whole domain
+    helios::vec3 boxmin, boxmax;
+    getGridBoundingBox(boxmin, boxmax);  
+    bb_center = make_float3(boxmin.x + 0.5*(boxmax.x-boxmin.x),boxmin.y + 0.5*(boxmax.y-boxmin.y),boxmin.z + 0.5*(boxmax.z-boxmin.z) );
+    bb_size = make_float3(boxmax.x-boxmin.x, boxmax.y-boxmin.y, boxmax.z-boxmin.z );
+    
+  }
+  
+  //get geometry information and copy to GPU
+  
+  size_t c=0;
+  
+  std::map<std::string,int> textures;
+  std::map<std::string,int2> texture_size;
+  std::map<std::string,std::vector<std::vector<bool> > > texture_data;
+  int tID = 0;
+  
+  std::vector<uint> UUIDs_all = context->getAllUUIDs();
+  
+  std::vector<uint> ID_mapping;
+  
+  //----- PATCHES ----- //
+  
+  //figure out how many patches
+  size_t Npatches = 0;
+  for( int p=0; p<UUIDs_all.size(); p++ ){
+    if( context->getPrimitiveType(UUIDs_all.at(p)) == helios::PRIMITIVE_TYPE_PATCH ){
+      Npatches++;
+    }
+  }
+  
+  ID_mapping.resize(Npatches);
+  
+  float3* patch_vertex = (float3*)malloc(4*Npatches * sizeof(float3)); //allocate host memory
+  int* patch_textureID = (int*)malloc(Npatches * sizeof(int)); //allocate host memory
+  float2* patch_uv = (float2*)malloc(2*Npatches * sizeof(float2)); //allocate host memory
+  
+  c=0;
+  for( int p=0; p<UUIDs_all.size(); p++ ){
+    uint UUID = UUIDs_all.at(p);
+    if( context->getPrimitiveType(UUID) == helios::PRIMITIVE_TYPE_PATCH ){
+      std::vector<helios::vec3> verts = context->getPrimitiveVertices(UUID);
+      patch_vertex[4*c] = vec3tofloat3(verts.at(0));
+      patch_vertex[4*c+1] = vec3tofloat3(verts.at(1));
+      patch_vertex[4*c+2] = vec3tofloat3(verts.at(2));
+      patch_vertex[4*c+3] = vec3tofloat3(verts.at(3));
+      
+      ID_mapping.at(c) = UUIDs_all.at(p);
+      
+      if( !context->getPrimitiveTextureFile(UUID).empty() && context->primitiveTextureHasTransparencyChannel(UUID) ){
+        std::string tex = context->getPrimitiveTextureFile(UUID);
+        std::map<std::string,int>::iterator it = textures.find(tex);
+        if( it != textures.end() ){ //texture already exits
+          patch_textureID[c] = textures.at(tex);
+        }else{ //new texture
+          patch_textureID[c] = tID;
+          textures[tex] = tID;
+          helios::int2 tsize = context->getPrimitiveTextureSize(UUID);
+          texture_size[tex] = make_int2(tsize.x,tsize.y);
+          texture_data[tex] = *context->getPrimitiveTextureTransparencyData(UUID);
+          tID++;
+        }
+        
+        std::vector<helios::vec2> uv = context->getPrimitiveTextureUV(UUID);
+        if( uv.size()==4 ){//custom uv coordinates
+          patch_uv[2*c] = vec2tofloat2(uv.at(1));
+          patch_uv[2*c+1] = vec2tofloat2(uv.at(3));
+        }else{//default uv coordinates
+          patch_uv[2*c] = make_float2(0,0);
+          patch_uv[2*c+1] = make_float2(1,1);
+        }
+        
+      }else{
+        patch_textureID[c]=-1;
+      }
+      
+      c++;
+    }
+  }
+  
+  float3* d_patch_vertex;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_patch_vertex,4*Npatches*sizeof(float3)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_patch_vertex, patch_vertex, 4*Npatches*sizeof(float3), cudaMemcpyHostToDevice) );
+  int* d_patch_textureID;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_patch_textureID,Npatches*sizeof(int)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_patch_textureID, patch_textureID, Npatches*sizeof(int), cudaMemcpyHostToDevice) );
+  float2* d_patch_uv;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_patch_uv, 2*Npatches*sizeof(float2)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_patch_uv, patch_uv, 2*Npatches*sizeof(float2), cudaMemcpyHostToDevice) );
+  
+  //----- TRIANGLES ----- //
+  
+  //figure out how many triangles
+  size_t Ntriangles = 0;
+  for( int p=0; p<UUIDs_all.size(); p++ ){
+    if( context->getPrimitiveType(UUIDs_all.at(p)) == helios::PRIMITIVE_TYPE_TRIANGLE ){
+      Ntriangles++;
+    }
+  }
+  
+  ID_mapping.resize(Npatches+Ntriangles);
+  
+  float3* tri_vertex = (float3*)malloc(3*Ntriangles * sizeof(float3)); //allocate host memory
+  int* tri_textureID = (int*)malloc(Ntriangles * sizeof(int)); //allocate host memory
+  float2* tri_uv = (float2*)malloc(3*Ntriangles * sizeof(float2)); //allocate host memory
+  
+  c=0;
+  for( int p=0; p<UUIDs_all.size(); p++ ){
+    uint UUID = UUIDs_all.at(p);
+    if( context->getPrimitiveType(UUID) == helios::PRIMITIVE_TYPE_TRIANGLE ){
+      std::vector<helios::vec3> verts = context->getPrimitiveVertices(UUID);
+      tri_vertex[3*c] = vec3tofloat3(verts.at(0));
+      tri_vertex[3*c+1] = vec3tofloat3(verts.at(1));
+      tri_vertex[3*c+2] = vec3tofloat3(verts.at(2));
+      
+      ID_mapping.at(Npatches+c) = UUIDs_all.at(p);
+      
+      if( !context->getPrimitiveTextureFile(UUID).empty() && context->primitiveTextureHasTransparencyChannel(UUID) ){
+        std::string tex = context->getPrimitiveTextureFile(UUID);
+        std::map<std::string,int>::iterator it = textures.find(tex);
+        if( it != textures.end() ){ //texture already exits
+          tri_textureID[c] = textures.at(tex);
+        }else{ //new texture
+          tri_textureID[c] = tID;
+          textures[tex] = tID;
+          helios::int2 tsize = context->getPrimitiveTextureSize(UUID);
+          texture_size[tex] = make_int2(tsize.x,tsize.y);
+          texture_data[tex] = *context->getPrimitiveTextureTransparencyData(UUID);
+          tID++;
+        }
+        
+        std::vector<helios::vec2> uv = context->getPrimitiveTextureUV(UUID);
+        assert( uv.size()==3 );
+        tri_uv[3*c] = vec2tofloat2(uv.at(0));
+        tri_uv[3*c+1] = vec2tofloat2(uv.at(1));
+        tri_uv[3*c+2] = vec2tofloat2(uv.at(2));
+        
+      }else{
+        tri_textureID[c]=-1;
+      }
+      
+      c++;
+    }
+  }
+  
+  float3* d_tri_vertex;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_tri_vertex,3*Ntriangles*sizeof(float3)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_tri_vertex, tri_vertex, 3*Ntriangles*sizeof(float3), cudaMemcpyHostToDevice) );
+  int* d_tri_textureID;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_tri_textureID, Ntriangles*sizeof(int)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_tri_textureID, tri_textureID, Ntriangles*sizeof(int), cudaMemcpyHostToDevice) );
+  float2* d_tri_uv;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_tri_uv,3*Ntriangles*sizeof(float2)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_tri_uv, tri_uv, 3*Ntriangles*sizeof(float2), cudaMemcpyHostToDevice) );
+  
+  //transfer texture data to GPU
+  const int Ntextures = textures.size();
+  
+  int2 masksize_max = make_int2(0,0);
+  for( std::map<std::string,int2>::iterator it=texture_size.begin(); it!=texture_size.end(); ++it ){
+    if( it->second.x>masksize_max.x ){
+      masksize_max.x=it->second.x;
+    }
+    if( it->second.y>masksize_max.y ){
+      masksize_max.y=it->second.y;
+    }
+  }
+  
+  bool* maskdata = (bool*)malloc(Ntextures*masksize_max.x*masksize_max.y * sizeof(bool)); //allocate host memory
+  int2* masksize = (int2*)malloc(Ntextures * sizeof(int2)); //allocate host memory
+  
+  for( std::map<std::string,int2>::iterator it=texture_size.begin(); it!=texture_size.end(); ++it ){
+    std::string texture_file = it->first;
+    
+    int ID = textures.at(texture_file); 
+    
+    masksize[ID] = it->second;
+    
+    int ind=0;
+    for( int j=0; j<masksize_max.y; j++ ){
+      for( int i=0; i<masksize_max.x; i++ ){
+        
+        if( i<texture_size.at(texture_file).x && j<texture_size.at(texture_file).y ){
+          maskdata[ID*masksize_max.x*masksize_max.y+ind] = texture_data.at(texture_file).at(j).at(i);
+        }else{
+          maskdata[ID*masksize_max.x*masksize_max.y+ind] = false;
+        }
+        ind++;
+      }
+    }
+  }
+  
+  bool* d_maskdata;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_maskdata, Ntextures*masksize_max.x*masksize_max.y * sizeof(bool)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_maskdata, maskdata, Ntextures*masksize_max.x*masksize_max.y * sizeof(bool), cudaMemcpyHostToDevice) );
+  int2* d_masksize;
+  CUDA_CHECK_ERROR( cudaMalloc((void**)&d_masksize, Ntextures * sizeof(int2)) ); //allocate device memory
+  CUDA_CHECK_ERROR( cudaMemcpy(d_masksize, masksize, Ntextures * sizeof(int2), cudaMemcpyHostToDevice) );
+  
+  for( int s=0; s< getScanCount(); s++ ){
+    
+    float3 scan_origin = vec3tofloat3(getScanOrigin(s));
+    
+    int Ntheta = getScanSizeTheta(s);
+    int Nphi = getScanSizePhi(s);
+    
+    helios::vec2 thetarange = getScanRangeTheta(s);
+    float thetamin = thetarange.x;
+    float thetamax = thetarange.y;
+    helios::vec2 phirange = getScanRangePhi(s);
+    float phimin = phirange.x;
+    float phimax = phirange.y;
+    
+    std::vector<std::string> column_format = getScanColumnFormat(s);
+    
+    std::vector<helios::vec3> raydir;
+    raydir.resize(Ntheta*Nphi);
+    
+    for (uint j=0; j<Nphi; j++ ){
+      float phi = phimin+float(j)*(phimax-phimin)/float(Nphi);
+      for (uint i=0; i<Ntheta; i++ ){        
+        float theta_z = thetamin+float(i)*(thetamax-thetamin)/float(Ntheta);
+        float theta_elev = 0.5f*M_PI-theta_z;
+        helios::vec3 dir = sphere2cart(helios::make_SphericalCoord(1.f,theta_elev,phi));
+        raydir.at(Ntheta*j+i) = dir;
+      }
+    }
+    
+    size_t N = Ntheta*Nphi;
+    
+    float3* d_hit_xyz;
+    CUDA_CHECK_ERROR( cudaMalloc((void**)&d_hit_xyz,N*sizeof(float3)) ); //allocate device memory
+    
+    //copy scan data into the host buffer
+    float3* hit_xyz = (float3*)malloc(N * sizeof(float3)); //allocate host memory
+    for( std::size_t r=0; r<N; r++ ){
+      hit_xyz[r] = scan_origin+vec3tofloat3(raydir.at(r)*10000.f);
+    }
+    
+    //copy from host to device memory
+    CUDA_CHECK_ERROR( cudaMemcpy(d_hit_xyz, hit_xyz, N*sizeof(float3), cudaMemcpyHostToDevice) );
+    
+    uint* bb_hit = (uint*)malloc(N * sizeof(uint)); //allocate host memory
+    uint* d_bb_hit;
+    CUDA_CHECK_ERROR( cudaMalloc((void**)&d_bb_hit,N*sizeof(uint)) ); //allocate device memory
+    CUDA_CHECK_ERROR( cudaMemset( d_bb_hit, 0, N*sizeof(uint)) ); //initialize to zero, set equal to 1 if the ray is found to intersect bounding box
+    
+    //Launch kernel to determine which rays intersect bounding box
+    uint3 dimBlock = make_uint3( 512, 1, 1 );
+    uint3 dimGrid = make_uint3( ceil(float(N)/float(dimBlock.x)), 1, 1 );
+    intersectBoundingBox<<< dimGrid, dimBlock >>>( N, scan_origin, d_hit_xyz, bb_center, bb_size, d_bb_hit );
+    
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR( cudaPeekAtLastError() ); //if there was an error inside the kernel, it will show up here
+    
+    //copy hit flag back to host
+    CUDA_CHECK_ERROR( cudaMemcpy(bb_hit, d_bb_hit, N*sizeof(uint), cudaMemcpyDeviceToHost) );
+    
+    CUDA_CHECK_ERROR( cudaFree(d_hit_xyz) );
+    CUDA_CHECK_ERROR( cudaFree(d_bb_hit) );
+    
+    //determine how many rays hit the bounding box
+    N = 0;
+    float hit_out = 0;
+    for( int i=0; i<Ntheta*Nphi; i++ ){
+      if( bb_hit[i]==1 ){
+        N++;
+        helios::SphericalCoord dir = cart2sphere(raydir[i]);
+        hit_out += sin(dir.zenith);
+      }
+    }
+    
+    if( N==0 ){
+      std::cout << "WARNING: Synthetic rays did not hit any primitives." << std::endl;
+      return;
+    }
+    
+    //make a new array of ray directions for rays that hit bounding box
+    float3* direction = (float3*)malloc(N * sizeof(float3)); //allocate host memory
+    
+    std::vector<helios::int2> pulse_scangrid_ij(N);
+    
+    int count=0;
+    for( int i=0; i<Ntheta*Nphi; i++ ){
+      if( bb_hit[i]==1 ){
+        
+        direction[count] = vec3tofloat3(raydir.at(i));
+        
+        int jj = floor(i/Ntheta);
+        int ii = i-jj*Ntheta;
+        pulse_scangrid_ij[count] = helios::make_int2(ii,jj);
+        
+        count++;
+      }else if( record_misses && !scan_grid_only ){
+        
+        std::map<std::string,double> data;
+        data["target_index"] = 0;
+        data["target_count"] = 1;
+        data["deviation"] = 0;
+        data["timestamp"] = i;
+        data["intensity"] = 0;
+        data["distance"] = miss_distance;
+        data["nRaysHit"] = rays_per_pulse;
+        
+        helios::vec3 miss_xyz = getScanOrigin(s) + miss_distance*raydir.at(i);
+        
+        addHitPoint( s, miss_xyz, helios::cart2sphere(raydir.at(i)), helios::RGB::black, data );
+        
+      }
+    }
+    free(bb_hit);
+    
+    float3* d_raydir;
+    CUDA_CHECK_ERROR( cudaMalloc((void**)&d_raydir,N*sizeof(float3)) ); //allocate device memory
+    CUDA_CHECK_ERROR( cudaMemcpy(d_raydir, direction, N*sizeof(float3), cudaMemcpyHostToDevice) );
+    
+    //Distance to intersection
+    float* d_hit_t;
+    CUDA_CHECK_ERROR( cudaMalloc((void**)&d_hit_t,N*Npulse*sizeof(float)) ); //allocate device memory
+    float* hit_t = (float*)malloc(N*Npulse * sizeof(float)); //allocate host memory
+    for( int i=0; i<N*Npulse; i++ ){
+      hit_t[i] = miss_distance;
+    }
+    CUDA_CHECK_ERROR( cudaMemcpy(d_hit_t, hit_t, N*Npulse*sizeof(float), cudaMemcpyHostToDevice) );
+    
+    //Dot product of primitive normal and ray direction (for calculating intensity)
+    float* d_hit_fnorm;
+    CUDA_CHECK_ERROR( cudaMalloc((void**)&d_hit_fnorm,N*Npulse*sizeof(float)) ); //allocate device memory
+    float* hit_fnorm = (float*)malloc(N*Npulse * sizeof(float)); //allocate host memory
+    for( int i=0; i<N*Npulse; i++ ){
+      hit_fnorm[i] = 1e6;
+    }
+    CUDA_CHECK_ERROR( cudaMemcpy(d_hit_fnorm, hit_fnorm, N*Npulse*sizeof(float), cudaMemcpyHostToDevice) );
+    
+    //ID of intersected primitive
+    int* d_hit_ID;
+    CUDA_CHECK_ERROR( cudaMalloc((void**)&d_hit_ID,N*Npulse*sizeof(int)) ); //allocate device memory
+    int* hit_ID = (int*)malloc(N*Npulse * sizeof(int)); //allocate host memory
+    for( int i=0; i<N*Npulse; i++ ){
+      hit_ID[i] = 999999999;
+    }
+    CUDA_CHECK_ERROR( cudaMemcpy(d_hit_ID, hit_ID, N*Npulse*sizeof(float), cudaMemcpyHostToDevice) );
+    
+    float exit_diameter = getScanBeamExitDiameter(s);
+    float beam_divergence = getScanBeamDivergence(s);
+    
+    if( Npulse>1 ){
+      dimBlock = make_uint3( 128, 4, 1 );
+    }else{
+      dimBlock = make_uint3( 512, 1, 1 );
+    }
+    dimGrid = make_uint3( ceil(float(N)/float(dimBlock.x)), ceil(float(Npulse)/float(dimBlock.y)), 1 );
+    
+    //---- patch kernel ----//
+    intersectPatches<<< dimGrid, dimBlock >>>( N, Npulse, scan_origin, d_raydir, exit_diameter, beam_divergence, Npatches, d_patch_vertex, d_patch_textureID, Ntextures, d_masksize, masksize_max, d_maskdata, d_patch_uv, d_hit_t, d_hit_fnorm, d_hit_ID );
+    
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR( cudaPeekAtLastError() ); //if there was an error inside the kernel, it will show up here
+    
+    //---- triangle kernel ----//
+    intersectTriangles<<< dimGrid, dimBlock >>>( N, Npulse, scan_origin, d_raydir, exit_diameter, beam_divergence, Ntriangles, Npatches, d_tri_vertex, d_tri_textureID, Ntextures, d_masksize, masksize_max, d_maskdata, d_tri_uv, d_hit_t, d_hit_fnorm, d_hit_ID );
+    
+    cudaDeviceSynchronize();
+    CUDA_CHECK_ERROR( cudaPeekAtLastError() ); //if there was an error inside the kernel, it will show up here
+    
+    //copy back
+    CUDA_CHECK_ERROR( cudaMemcpy(hit_t, d_hit_t, N*Npulse*sizeof(float), cudaMemcpyDeviceToHost) );
+    CUDA_CHECK_ERROR( cudaMemcpy(hit_fnorm, d_hit_fnorm, N*Npulse*sizeof(float), cudaMemcpyDeviceToHost) );
+    CUDA_CHECK_ERROR( cudaMemcpy(hit_ID, d_hit_ID, N*Npulse*sizeof(int), cudaMemcpyDeviceToHost) );
+    
+    size_t Nhits = 0;
+    
+    // vector of distance values weighted by intensity
+    float bin_width = 0.01; // distance range of one bin
+    float max_distance = 1e6;
+    int nBins = int(max_distance/bin_width);
+    std::vector<float> histogram_values_intensity(nBins, 0);
+    std::vector<int> histogram_values_count(nBins, 0);
+    std::vector<uint> histogram_values_UUID(nBins, 999999);
+    
+    
+    //looping over beams
+    for( size_t r=0; r<N; r++ ){
+      
+      std::vector<std::vector<float> > t_pulse;
+      std::vector<std::vector<float> > t_hit;
+      std::vector<std::vector<float> > t_hit_initial;
+      std::fill(histogram_values_intensity.begin(), histogram_values_intensity.end(), 0.0);
+      std::fill(histogram_values_count.begin(), histogram_values_count.end(), 0);
+      std::fill(histogram_values_UUID.begin(), histogram_values_UUID.end(), 999999);
+      
+      
+      //looping over rays in each beam
+      for( size_t p=0; p<Npulse; p++ ){
+        
+        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1e6)
+        float i = hit_fnorm[r*Npulse+p]; //dot product between beam direction and primitive normal
+        float ID = float(hit_ID[r*Npulse+p]);   //ID of intersected primitive
+        
+        if( record_misses || (!record_misses && t<miss_distance ) ){
+          std::vector<float> v{t,i,ID};
+          t_pulse.push_back(v);
+        }
+        
+      }
+      
+      if( t_pulse.size()==1 ){ //this is discrete-return data, or we only had one hit for this pulse
+        
+        float distance = t_pulse.front().at(0);
+        float intensity = t_pulse.front().at(1);
+        if( distance>=0.98f*miss_distance ){
+          intensity=0;
+        }
+        float nPulseHit = 1;
+        float IDmap = t_pulse.front().at(2);
+        
+        std::vector<float> v{distance,intensity,nPulseHit,IDmap};
+        t_hit.push_back( v );
+        
+      }else if( t_pulse.size()>1 ){ //more than one hit for this pulse
+        
+        // std::cout << "start changes" << std::endl;
+        
+        std::sort( t_pulse.begin(), t_pulse.end(), LIDAR_CUDA::sortcol0 );
+        
+        //loop over rays in this beam and group into bins
+        for( size_t hit=0; hit<t_pulse.size(); hit++ ){
+          float d=t_pulse.at(hit).at(0);
+          float f=t_pulse.at(hit).at(1);
+          for(uint hh=0;hh<histogram_values_count.size();hh++)
+          {
+            float current_beam_start_distance = bin_width*float(hh);
+            if(d < current_beam_start_distance)
+            {
+              histogram_values_intensity.at(hh) = histogram_values_intensity.at(hh) + f;
+              histogram_values_count.at(hh) = histogram_values_count.at(hh) + 1;
+              histogram_values_UUID.at(hh) = t_pulse.at(hit).at(2);
+              
+              break;
+            }
+          }
+        }
+        
+        // find peaks in the histogram
+        // these are the indices of histogram_values_intensity
+        std::vector<uint> peaks = peakFinder(histogram_values_intensity);
+        std::vector<uint> split_points_temp;
+        std::vector<uint> split_points;
+        split_points_temp.resize(peaks.size() - 1);
+        
+        // now find the minimum values of intensity between adjacent peaks
+        // these will be used as break/split points in deciding which histogram "bars" to group into which hit points
+        for(uint pk=0;pk<(peaks.size()-1);pk++)
+        {
+          //get the values from one peak to the next
+          std::vector<float> interval_values{histogram_values_intensity.begin() + peaks.at(pk), histogram_values_intensity.begin() + peaks.at(pk+1)};
+          // find the first element of the interval_values vector that has the minimum value of intensity
+          split_points_temp.at(pk) = std::distance(std::begin(interval_values), std::min_element(std::begin(interval_values), std::end(interval_values)));
+          
+          // add this index to the index of the peak to get the index of histogram_values_intensity
+          split_points.push_back(split_points_temp.at(pk) + peaks.at(pk));
+          
+        }
+        // add the last element
+        split_points.push_back(histogram_values_intensity.size()-1);
+        
+        std::vector<uint> split_points_start = split_points;
+        split_points_start.insert (split_points_start.begin(), 0);
+        
+        // loop through the split points
+        for(uint sp=0;sp<split_points.size();sp++)
+        {
+          float hp_intensity = 0;
+          int hp_raycount = 0;
+          for(uint iii=split_points_start.at(sp);iii < split_points.at(sp);iii++)
+          {
+            hp_intensity = hp_intensity +  histogram_values_intensity.at(iii);
+            hp_raycount = hp_raycount +  histogram_values_count.at(iii);
+          }
+          
+          float distance = bin_width*peaks.at(sp);
+          float intensity = hp_intensity/Npulse;
+          float nPulseHit = float(hp_raycount);
+          float IDmap = histogram_values_UUID.at(peaks.at(sp));
+          std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+          t_hit_initial.push_back( v );
+        } 
+      }
+      
+      // initial grouping is done.
+      // now see if we need to merge any hits
+      
+      float d0 = t_hit_initial.at(0).at(0);
+      float f0 = t_hit_initial.at(0).at(1);
+      float nr = float(t_hit_initial.at(0).at(2));
+      
+      //loop over hit points
+      for( size_t hit=1; hit<=t_hit_initial.size(); hit++ ){
+        
+        // if the end has been reached, output the last hitpoint
+        if( hit == t_hit_initial.size()){
+          
+          float distance = d0;
+          float intensity = f0;
+          float nPulseHit = float(nr);
+          float IDmap = t_hit_initial.at(hit-1).at(2);
+          
+          std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+          t_hit.push_back( v );
+          
+          // else if the current hit is more than the pulse threshold distance from t0,  it is part of the next hitpoint so output the previous hitpoint and reset
+        }else if( t_hit_initial.at(hit).at(0)-d0 > pulse_distance_threshold ){
+          
+          float distance = d0;
+          float intensity = f0;
+          float nPulseHit = float(nr);
+          float IDmap = t_hit_initial.at(hit-1).at(2);
+          
+          std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //included the ray count here
+          //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+          t_hit.push_back( v );
+          
+          d0 = t_hit_initial.at(hit).at(0);
+          f0 = t_hit_initial.at(hit).at(1);
+          nr = float(t_hit_initial.at(hit).at(2));
+          
+          // or else the current hit point is less than pulse threshold from the previous one and is part of current hitpoint; add it to the current hit point and continue on
+        }else{
+          
+          // the new mean distance for the hit point weighted by intensity
+          d0 = (d0*f0 + t_hit_initial.at(hit).at(0)*t_hit_initial.at(hit).at(1))/(f0 + t_hit_initial.at(hit).at(1));
+          f0 = f0 + t_hit_initial.at(hit).at(1);
+          nr = nr + float(t_hit_initial.at(hit).at(2));
+        }
+        
+      }
+      
+      
       
       float average=0;
       for( size_t hit=0; hit<t_hit.size(); hit++ ){

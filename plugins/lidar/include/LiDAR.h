@@ -1030,6 +1030,31 @@ d the last cell's index is Ncells-1.
    */
   void syntheticScan_Tpd_alt( helios::Context* context, int rays_per_pulse, float pulse_distance_threshold, bool scan_grid_only, bool record_misses );
   
+  //! Run a full-waveform synthetic LiDAR scan based on scan parameters given in an XML file (returns multiple laser hits per pulse)
+  /**
+   * \param[in] "context" Pointer to the Helios context.
+   * \param[in] "rays_per_pulse" Number of ray launches per laser pulse direction.
+   * \param[in] "pulse_distance_threshold" Threshold distance for determining laser hit locations. Hits within pulse_distance_threshold of each other will be grouped into a single hit.
+   * \param[in] "scan_grid_only" If true, only considers context geometry within the scan grid. scan_grid_only=true can save substantial memory for contexts with large domains.
+   * \param[in] "record_misses" If true, "miss" points (i.e., beam did not hit any primitives) are recorded in the scan.
+   * \note Calling syntheticScan() with rays_per_pulse=1 will effectively run a discrete return synthetic scan.
+   * \note This version separates rays that are > Tpd away from the first ray in the group, rather than Tpd away from any ray in the group
+   */
+  void syntheticScan_histogram( helios::Context* context, int rays_per_pulse, float pulse_distance_threshold, bool scan_grid_only, bool record_misses );
+ 
+ 
+ //! Run a full-waveform synthetic LiDAR scan based on scan parameters given in an XML file (returns multiple laser hits per pulse)
+ /**
+  * \param[in] "context" Pointer to the Helios context.
+  * \param[in] "rays_per_pulse" Number of ray launches per laser pulse direction.
+  * \param[in] "pulse_distance_threshold" Threshold distance for determining laser hit locations. Hits within pulse_distance_threshold of each other will be grouped into a single hit.
+  * \param[in] "scan_grid_only" If true, only considers context geometry within the scan grid. scan_grid_only=true can save substantial memory for contexts with large domains.
+  * \param[in] "record_misses" If true, "miss" points (i.e., beam did not hit any primitives) are recorded in the scan.
+  * \note Calling syntheticScan() with rays_per_pulse=1 will effectively run a discrete return synthetic scan.
+  * \note This version separates rays that are > Tpd away from the first ray in the group, rather than Tpd away from any ray in the group
+  */
+ void syntheticScan_histogram_Tpd( helios::Context* context, int rays_per_pulse, float pulse_distance_threshold, bool scan_grid_only, bool record_misses );
+ 
   
   
   //! Calculate the surface area of all primitives in the context
