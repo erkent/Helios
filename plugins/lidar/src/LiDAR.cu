@@ -6615,6 +6615,9 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
     float* hit_fnorm = (float*)malloc(N*Npulse * sizeof(float)); //allocate host memory
     for( int i=0; i<N*Npulse; i++ ){
       hit_fnorm[i] = 1e6;
+      // hit_fnorm[i] = 0.0;
+      //ERK
+      
     }
     CUDA_CHECK_ERROR( cudaMemcpy(d_hit_fnorm, hit_fnorm, N*Npulse*sizeof(float), cudaMemcpyHostToDevice) );
     
@@ -6658,15 +6661,21 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
     
     // vector of distance values weighted by intensity
     float bin_width = 0.01; // distance range of one bin
-    float max_distance = 1e6;
+    float max_distance = 1000;
     int nBins = int(max_distance/bin_width);
     std::vector<float> histogram_values_intensity(nBins, 0);
     std::vector<int> histogram_values_count(nBins, 0);
     std::vector<uint> histogram_values_UUID(nBins, 999999);
+    uint last_bin_index = histogram_values_count.size()-1;
+    float max_bin = bin_width*float(last_bin_index);
+    std::cout << "max_bin = " << max_bin << std::endl; 
     
     
     //looping over beams
     for( size_t r=0; r<N; r++ ){
+      
+      std::cout << "*******************************************************************************" << std::endl;
+      std::cout << "Beam " << r << " of " << N << std::endl;
       
       std::vector<std::vector<float> > t_pulse;
       std::vector<std::vector<float> > t_hit;
@@ -6675,12 +6684,24 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
       std::fill(histogram_values_count.begin(), histogram_values_count.end(), 0);
       std::fill(histogram_values_UUID.begin(), histogram_values_UUID.end(), 999999);
       
-      
-      //looping over rays in each beam
+      // std::cout << "Ray intensity values: " << std::endl;
+      // int tc = 0;
+      //looping over rays in the beam
       for( size_t p=0; p<Npulse; p++ ){
         
         float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1e6)
         float i = hit_fnorm[r*Npulse+p]; //dot product between beam direction and primitive normal
+        
+        // if(tc < 30)
+        // {
+        //   std::cout << i << ", ";
+        //   tc++;
+        // }else{
+        //   std::cout << i << std::endl;
+        //   tc = 0;
+        // }
+        // 
+        
         float ID = float(hit_ID[r*Npulse+p]);   //ID of intersected primitive
         
         if( record_misses || (!record_misses && t<miss_distance ) ){
@@ -6689,7 +6710,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
         }
         
       }
-      
+    
       if( t_pulse.size()==1 ){ //this is discrete-return data, or we only had one hit for this pulse
         
         float distance = t_pulse.front().at(0);
@@ -6705,77 +6726,209 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
         
       }else if( t_pulse.size()>1 ){ //more than one hit for this pulse
         
-        // std::cout << "start changes" << std::endl;
-        
+
         std::sort( t_pulse.begin(), t_pulse.end(), LIDAR_CUDA::sortcol0 );
        
        //loop over rays in this beam and group into bins
        for( size_t hit=0; hit<t_pulse.size(); hit++ ){
          float d=t_pulse.at(hit).at(0);
          float f=t_pulse.at(hit).at(1);
-         for(uint hh=0;hh<histogram_values_count.size();hh++)
+         
+         for(uint hh=0;hh<(histogram_values_count.size()-1);hh++)
          {
-           float current_beam_start_distance = bin_width*float(hh);
-           if(d < current_beam_start_distance)
+  
+           float current_bin_end_distance = bin_width*float(hh+1);
+           if(d < current_bin_end_distance)
            {
+             // if in the bin, update the bin vectors and go to next ray
              histogram_values_intensity.at(hh) = histogram_values_intensity.at(hh) + f;
              histogram_values_count.at(hh) = histogram_values_count.at(hh) + 1;
              histogram_values_UUID.at(hh) = t_pulse.at(hit).at(2);
-             
+             break;
+           }else if(d >= max_bin){
+             //if the ray distance is past the max bin, put it in the last bin
+             histogram_values_intensity.at(last_bin_index) = histogram_values_intensity.at(last_bin_index) + f;
+             histogram_values_count.at(last_bin_index) = histogram_values_count.at(last_bin_index) + 1;
+             histogram_values_UUID.at(last_bin_index) = t_pulse.at(hit).at(2);
              break;
            }
          }
        }
        
+       // print out the counts histogram values
+       int tc2 = 0;
+       int zero_count = 0;
+       std::cout << "histogram_values_count" << std::endl;
+       for(uint hh=0;hh<(histogram_values_intensity.size());hh++)
+       {
+         if(histogram_values_count.at(hh) > 0)
+         {
+               if((histogram_values_count.at(hh-1) == 0 || hh == 0))
+               {
+                 std::cout << "|| " << zero_count << " bins with zero ||, ";
+               }
+               
+               if(tc2 < 60)
+               {
+                 std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], ";
+                 tc2++;
+               }else{
+                 std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], "  << std::endl;
+                 tc2 = 0;
+               }
+               
+         }else{
+               zero_count++;
+          }
+       }
+       
+       
+       // std::cout << std::endl;
+       // std::cout << "##########################################" << std::endl;
+       // std::cout << "histogram_values_intensity" << std::endl;
+       // int tc2 = 0;
+       // int zero_count = 0;
+       // for(uint hh=0;hh<(histogram_values_intensity.size());hh++)
+       // {
+       //   if(histogram_values_intensity.at(hh) > 0)
+       //   {
+       //     if((histogram_values_intensity.at(hh-1) == 0 || hh == 0))
+       //     {
+       //       std::cout << "|| " << zero_count << " bins with zero ||, "; 
+       //     }
+       // 
+       //     
+       //     if(tc2 < 60)
+       //     {
+       //       std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], ";
+       //       tc2++;
+       //     }else{
+       //       std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], "  << std::endl;
+       //       tc2 = 0;
+       //     }
+       //   }else{
+       //     zero_count++;
+       //   }
+       // }
+
        // find peaks in the histogram
        // these are the indices of histogram_values_intensity
        std::vector<uint> peaks = peakFinder(histogram_values_intensity);
-       std::vector<uint> split_points_temp;
-       std::vector<uint> split_points;
-       split_points_temp.resize(peaks.size() - 1);
        
-       // now find the minimum values of intensity between adjacent peaks
-       // these will be used as break/split points in deciding which histogram "bars" to group into which hit points
-       for(uint pk=0;pk<(peaks.size()-1);pk++)
+       std::cout << std::endl;
+       std::cout << "peaks intensity (count) [index] :" << std::endl;
+       for(uint pk = 0;pk<peaks.size();pk++)
        {
-         //get the values from one peak to the next
-         std::vector<float> interval_values{histogram_values_intensity.begin() + peaks.at(pk), histogram_values_intensity.begin() + peaks.at(pk+1)};
-         // find the first element of the interval_values vector that has the minimum value of intensity
-         split_points_temp.at(pk) = std::distance(std::begin(interval_values), std::min_element(std::begin(interval_values), std::end(interval_values)));
-         
-         // add this index to the index of the peak to get the index of histogram_values_intensity
-         split_points.push_back(split_points_temp.at(pk) + peaks.at(pk));
-         
+         std::cout << histogram_values_intensity.at(peaks.at(pk)) << "(" << histogram_values_count.at(peaks.at(pk)) << ")[" << peaks.at(pk) << "], ";
        }
-       // add the last element
-       split_points.push_back(histogram_values_intensity.size()-1);
        
-       std::vector<uint> split_points_start = split_points;
-       split_points_start.insert (split_points_start.begin(), 0);
- 
-       // loop through the split points
-       for(uint sp=0;sp<split_points.size();sp++)
+       // std::cout << std::endl;
+       // std::cout << "histogram_values_intensity.size() = " << histogram_values_intensity.size() << std::endl;
+       // // std::cout << "max = " << max(histogram_values_intensity) << std::endl;
+       // double max = *max_element(histogram_values_intensity.begin(), histogram_values_intensity.end());
+       // std::cout<<"Max value: "<<max<<std::endl;
+       // 
+       // double maxc = *max_element(histogram_values_count.begin(), histogram_values_count.end());
+       // std::cout<<"Max count: "<<maxc<<std::endl;
+       // 
+       //if there is only one peak, just sum all histogram bars and put it at the peak location
+       // else find the minimum values between peaks and use those as the dividers to decide which bars get summed into which peak
+       if(peaks.size() == 1)
        {
+         
          float hp_intensity = 0;
          int hp_raycount = 0;
-         for(uint iii=split_points_start.at(sp);iii < split_points.at(sp);iii++)
+         for(uint iii=0;iii < histogram_values_intensity.size();iii++)
          {
            hp_intensity = hp_intensity +  histogram_values_intensity.at(iii);
            hp_raycount = hp_raycount +  histogram_values_count.at(iii);
          }
-
-         float distance = bin_width*peaks.at(sp);
-         float intensity = hp_intensity/Npulse;
+         
+         float distance = bin_width*peaks.at(0) + 0.5*bin_width;
+         float intensity = hp_intensity/float(Npulse);
          float nPulseHit = float(hp_raycount);
-         float IDmap = histogram_values_UUID.at(peaks.at(sp));
+         float IDmap = histogram_values_UUID.at(peaks.at(0));
          std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
          t_hit_initial.push_back( v );
-       } 
+         
+       }else if(peaks.size() > 1){
+         
+         std::vector<uint> split_points_temp;
+         std::vector<uint> split_points;
+         
+         int new_size = peaks.size() - 1;
+         // std::cout << "new_size = " << new_size << std::endl;
+         split_points_temp.resize(new_size);
+        
+         // now find the minimum values of intensity between adjacent peaks
+         // these will be used as break/split points in deciding which histogram "bars" to group into which hit points
+         for(uint pk=0;pk<(peaks.size()-1);pk++)
+         {
+           //get the values from one peak to the next
+           std::vector<float> interval_values{histogram_values_intensity.begin() + peaks.at(pk), histogram_values_intensity.begin() + peaks.at(pk+1)};
+           // find the first element of the interval_values vector that has the minimum value of intensity
+           split_points_temp.at(pk) = std::distance(std::begin(interval_values), std::min_element(std::begin(interval_values), std::end(interval_values)));
+           
+           // add this index to the index of the peak to get the index of histogram_values_intensity
+           split_points.push_back(split_points_temp.at(pk) + peaks.at(pk));
+           
+         }
+         // // add the last element
+         // split_points.push_back(last_bin_index);
+         // 
+        
+         std::vector<uint> split_points_start = split_points;
+         split_points_start.insert (split_points_start.begin(), 0);
+         
+         // loop through the split points
+         for(uint sp=0;sp<split_points.size();sp++)
+         {
+           float hp_intensity = 0;
+           int hp_raycount = 0;
+           for(uint iii=split_points_start.at(sp);iii < split_points.at(sp);iii++)
+           {
+             hp_intensity = hp_intensity +  histogram_values_intensity.at(iii);
+             hp_raycount = hp_raycount +  histogram_values_count.at(iii);
+           }
+           
+           float distance = bin_width*peaks.at(sp) + 0.5*bin_width;
+           float intensity = hp_intensity/float(Npulse);
+           float nPulseHit = float(hp_raycount);
+           float IDmap = histogram_values_UUID.at(peaks.at(sp));
+           std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+           t_hit_initial.push_back( v );
+         }
+         
+         // all bins after the last split point go to the last peak
+         
+         float hp_intensity = 0;
+         int hp_raycount = 0;
+         for(uint iii=split_points_start.at(split_points.size());iii <= last_bin_index;iii++)
+         {
+           hp_intensity = hp_intensity +  histogram_values_intensity.at(iii);
+           hp_raycount = hp_raycount +  histogram_values_count.at(iii);
+         }
+         
+         // assume that all rays in a bin are at the mid-way point of the bin
+         float distance = bin_width*peaks.at(peaks.size()-1) + 0.5*bin_width;
+         float intensity = hp_intensity/float(Npulse);
+         float nPulseHit = float(hp_raycount);
+         float IDmap = histogram_values_UUID.at(peaks.at(peaks.size()-1));
+         std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(3)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+         t_hit_initial.push_back( v );
+         
+         // // add the last bin to catch misses
+         // float distance = max_distance;
+         // float intensity = 0.0;
+         // float nPulseHit = float(histogram_values_count.at(last_bin_index));
+         // float IDmap = -999999;
+         // std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+         // t_hit_initial.push_back( v );
+         
+       }
+       
       }
-      
-      // initial grouping is done.
-      // now see if we need to merge any hits
-      
+
       float d0 = t_hit_initial.at(0).at(0);
       float f0 = t_hit_initial.at(0).at(1);
       float nr = float(t_hit_initial.at(0).at(2));
@@ -6830,6 +6983,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
         
         Nhits++;
       }
+      std::cout << "after adding hit points" << std::endl;
       
     }
     
@@ -7283,11 +7437,16 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
     
     // vector of distance values weighted by intensity
     float bin_width = 0.01; // distance range of one bin
-    float max_distance = 1e6;
+    float max_distance = 1000;
     int nBins = int(max_distance/bin_width);
     std::vector<float> histogram_values_intensity(nBins, 0);
     std::vector<int> histogram_values_count(nBins, 0);
     std::vector<uint> histogram_values_UUID(nBins, 999999);
+    uint last_bin_index = histogram_values_count.size()-1;
+    
+    
+    float max_bin = bin_width*float(last_bin_index);
+    std::cout << "max_bin = " << max_bin << std::endl; 
     
     
     //looping over beams
@@ -7332,21 +7491,30 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
         
         // std::cout << "start changes" << std::endl;
         
+        //sort rays by distance
         std::sort( t_pulse.begin(), t_pulse.end(), LIDAR_CUDA::sortcol0 );
         
         //loop over rays in this beam and group into bins
         for( size_t hit=0; hit<t_pulse.size(); hit++ ){
           float d=t_pulse.at(hit).at(0);
           float f=t_pulse.at(hit).at(1);
-          for(uint hh=0;hh<histogram_values_count.size();hh++)
+          
+          for(uint hh = 0;hh < last_bin_index;hh++)
           {
-            float current_beam_start_distance = bin_width*float(hh);
-            if(d < current_beam_start_distance)
+            float current_bin_end_distance = bin_width*float(hh+1);
+            if(d < current_bin_end_distance)
             {
+              // if the ray intersects at distance less than the current bin, update the bin vectors and go to next ray
               histogram_values_intensity.at(hh) = histogram_values_intensity.at(hh) + f;
               histogram_values_count.at(hh) = histogram_values_count.at(hh) + 1;
               histogram_values_UUID.at(hh) = t_pulse.at(hit).at(2);
-              
+              break;
+            }else if(d >= max_bin){
+              //else if the ray intersects at a distance farther from the max defined bin, 
+              // but it in the last bin
+              histogram_values_intensity.at(last_bin_index) = histogram_values_intensity.at(last_bin_index) + f;
+              histogram_values_count.at(last_bin_index) = histogram_values_count.at(last_bin_index) + 1;
+              histogram_values_UUID.at(last_bin_index) = t_pulse.at(hit).at(2);
               break;
             }
           }
@@ -7355,49 +7523,109 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
         // find peaks in the histogram
         // these are the indices of histogram_values_intensity
         std::vector<uint> peaks = peakFinder(histogram_values_intensity);
-        std::vector<uint> split_points_temp;
-        std::vector<uint> split_points;
-        split_points_temp.resize(peaks.size() - 1);
         
-        // now find the minimum values of intensity between adjacent peaks
-        // these will be used as break/split points in deciding which histogram "bars" to group into which hit points
-        for(uint pk=0;pk<(peaks.size()-1);pk++)
+        //if there is only one peak, just sum all histogram bars and put it at the peak location
+        // else find the minimum values between peaks and use those as the dividers to decide which bars get summed into which peak
+        if(peaks.size() == 1)
         {
-          //get the values from one peak to the next
-          std::vector<float> interval_values{histogram_values_intensity.begin() + peaks.at(pk), histogram_values_intensity.begin() + peaks.at(pk+1)};
-          // find the first element of the interval_values vector that has the minimum value of intensity
-          split_points_temp.at(pk) = std::distance(std::begin(interval_values), std::min_element(std::begin(interval_values), std::end(interval_values)));
           
-          // add this index to the index of the peak to get the index of histogram_values_intensity
-          split_points.push_back(split_points_temp.at(pk) + peaks.at(pk));
-          
-        }
-        // add the last element
-        split_points.push_back(histogram_values_intensity.size()-1);
-        
-        std::vector<uint> split_points_start = split_points;
-        split_points_start.insert (split_points_start.begin(), 0);
-        
-        // loop through the split points
-        for(uint sp=0;sp<split_points.size();sp++)
-        {
           float hp_intensity = 0;
           int hp_raycount = 0;
-          for(uint iii=split_points_start.at(sp);iii < split_points.at(sp);iii++)
+          for(uint iii=0;iii < histogram_values_intensity.size();iii++)
           {
             hp_intensity = hp_intensity +  histogram_values_intensity.at(iii);
             hp_raycount = hp_raycount +  histogram_values_count.at(iii);
           }
           
-          float distance = bin_width*peaks.at(sp);
-          float intensity = hp_intensity/Npulse;
+          // assume that all rays in a bin are at the mid-way point of the bin
+          float distance = bin_width*peaks.at(0) + 0.5*bin_width;
+          float intensity = hp_intensity/float(Npulse);
           float nPulseHit = float(hp_raycount);
-          float IDmap = histogram_values_UUID.at(peaks.at(sp));
+          float IDmap = histogram_values_UUID.at(peaks.at(0));
           std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
           t_hit_initial.push_back( v );
-        } 
-      }
-      
+          
+        }else if(peaks.size() > 1){
+          
+          std::vector<uint> split_points_temp;
+          std::vector<uint> split_points;
+          
+          int new_size = peaks.size() - 1;
+          split_points_temp.resize(new_size);
+          
+          // now find the minimum values of intensity between adjacent peaks
+          // these will be used as break/split points in deciding which histogram bins to group into which hit points
+          for(uint pk=0;pk<(peaks.size()-1);pk++)
+          {
+            //get the values from one peak to the next
+            std::vector<float> interval_values{histogram_values_intensity.begin() + peaks.at(pk), histogram_values_intensity.begin() + peaks.at(pk+1)};
+            // find the first element of the interval_values vector that has the minimum value of intensity
+            split_points_temp.at(pk) = std::distance(std::begin(interval_values), std::min_element(std::begin(interval_values), std::end(interval_values)));
+            
+            // add this index to the index of the peak to get the index of histogram_values_intensity
+            split_points.push_back(split_points_temp.at(pk) + peaks.at(pk));
+            
+          }
+          // // add the last element
+          // split_points.push_back(histogram_values_intensity.size()-1);
+          // 
+          
+          std::vector<uint> split_points_start = split_points;
+          split_points_start.insert (split_points_start.begin(), 0);
+          
+          // loop through the split points
+          for(uint sp=0;sp<split_points.size();sp++)
+          {
+            float hp_intensity = 0;
+            int hp_raycount = 0;
+            for(uint iii=split_points_start.at(sp);iii < split_points.at(sp);iii++)
+            {
+              hp_intensity = hp_intensity +  histogram_values_intensity.at(iii);
+              hp_raycount = hp_raycount +  histogram_values_count.at(iii);
+            }
+            
+            // assume that all rays in a bin are at the mid-way point of the bin
+            float distance = bin_width*peaks.at(sp) + 0.5*bin_width;
+            float intensity = hp_intensity/float(Npulse);
+            float nPulseHit = float(hp_raycount);
+            float IDmap = histogram_values_UUID.at(peaks.at(sp));
+            std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(3)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+            t_hit_initial.push_back( v );
+          }
+          
+          // all bins after the last split point go to the last peak
+          
+          float hp_intensity = 0;
+          int hp_raycount = 0;
+          for(uint iii=split_points_start.at(split_points.size());iii <= last_bin_index;iii++)
+          {
+            hp_intensity = hp_intensity +  histogram_values_intensity.at(iii);
+            hp_raycount = hp_raycount +  histogram_values_count.at(iii);
+          }
+          
+          // assume that all rays in a bin are at the mid-way point of the bin
+          float distance = bin_width*peaks.at(peaks.size()-1) + 0.5*bin_width;
+          float intensity = hp_intensity/float(Npulse);
+          float nPulseHit = float(hp_raycount);
+          float IDmap = histogram_values_UUID.at(peaks.at(peaks.size()-1));
+          std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(3)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+          t_hit_initial.push_back( v );
+          
+          // // add the last bin to catch misses
+          // if(histogram_values_count.at(last_bin_index) > 0)
+          // {
+          // 
+          //   float distance = max_distance;
+          //   float intensity = 0.0;
+          //   float nPulseHit = float(histogram_values_count.at(last_bin_index));
+          //   float IDmap = -999999;
+          //   std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(3)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+          //   t_hit_initial.push_back( v );
+          // }
+
+          
+        }
+        
       // initial grouping is done.
       // now see if we need to merge any hits
       
@@ -7414,7 +7642,7 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
           float distance = d0;
           float intensity = f0;
           float nPulseHit = float(nr);
-          float IDmap = t_hit_initial.at(hit-1).at(2);
+          float IDmap = t_hit_initial.at(hit-1).at(3);
           
           std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
           t_hit.push_back( v );
@@ -7425,7 +7653,7 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
           float distance = d0;
           float intensity = f0;
           float nPulseHit = float(nr);
-          float IDmap = t_hit_initial.at(hit-1).at(2);
+          float IDmap = t_hit_initial.at(hit-1).at(3);
           
           std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //included the ray count here
           //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
@@ -7444,6 +7672,8 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
           nr = nr + float(t_hit_initial.at(hit).at(2));
         }
         
+      }
+      
       }
       
       
@@ -8822,32 +9052,55 @@ std::vector<uint> LiDARcloud::peakFinder(std::vector<float> signal){
  
   
   std::vector<uint> peakIndices;
-  int peakIndex = -1.0;
+  int peakIndex = -1;
   float peakValue = -1.0;
-  float baseline = 0;
-  for(uint i=0;i<signal.size();i++)
-  {
-    baseline = baseline + signal.at(i);
-  }
-  baseline = baseline/float(signal.size());
-  // baseline = 0.11;
+  float baseline = 0.0;
+  // for(uint i=0;i<signal.size();i++)
+  // {
+  //   baseline = baseline + signal.at(i);
+  // }
+  // baseline = baseline/float(signal.size());
+  // // baseline = 0.11;
+  
+  // std::cout << "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^" << std::endl; 
+  // std::cout << "signal" << std::endl; 
+  // 
   
   for(int i=0;i<signal.size();i++)
   {
+
     if(signal.at(i) > baseline)
     {
-      if(peakValue >= 0 | signal.at(i) > peakValue)
+      // std::cout << ", signal.at(i) > baseline";
+      
+      if(peakValue < 0.0 | signal.at(i) > peakValue)
       {
         peakIndex = i;
         peakValue = signal.at(i);
+        
+        // std::cout << ", new peakIndex = " << i << ", new peakValue = " << peakValue << std::endl;
+        
+      }else{
+        // std::cout << std::endl;
       }
-    }else if(signal.at(i) <= baseline & peakIndex >= 0){
+      
+    }else if(signal.at(i) <= baseline & peakIndex > -1){
+      
+      // std::cout << ", signal.at(i) <= baseline & peakIndex > -1";
+
+      
       peakIndices.push_back(peakIndex);
       peakIndex = -1;
-      peakValue = 0;
+      peakValue = -1.0;
+      
+      // std::cout << ", peakIndex added = " << peakIndex << std::endl;
+      
+      
     }
+    
+    
   }
-  if(peakIndex >= 0)
+  if(peakIndex > -1)
   {
     peakIndices.push_back(peakIndex);
   }
