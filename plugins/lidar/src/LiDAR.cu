@@ -1701,7 +1701,7 @@ void LiDARcloud::calculateLeafAreaGPU_testing( int min_voxel_hits){
 
 void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool beamoutput, bool fillAnalytic  ){
   
-  // calculates LAD using several different methods investigated in Kent & Bailey (2021)
+  // calculates LAD using several different methods investigated in Kent & Bailey (2023)
   // writes all voxel level variables to a file
   // optionally writes detailed information about each beam
   // unlike previous calculateLeafAreaGPU versions, this one does not set the cell leaf area variable and does not filter based on minVoxelHits argument 
@@ -1727,12 +1727,12 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
   dr_agg.resize(Ncells);
   std::vector<float> G_agg; //G is dot product between ray direction and triangle normal that was hit (only relevant for hits)
   G_agg.resize(Ncells,0);
-  std::vector<float> hit_before_agg; //hit_before corresponds to scan points that hit something before encountering a particular grid cell
-  hit_before_agg.resize(Ncells,0);
-  std::vector<float> hit_after_agg; //hit_after corresponds to scan points that hit something after encountering a particular grid cell (including something inside that cell)
-  hit_after_agg.resize(Ncells,0);
-  std::vector<float> hit_inside_agg; //hit_inside corresponds to scan points that hit something within a particular grid cell.
-  hit_inside_agg.resize(Ncells,0);
+  // std::vector<float> hit_before_agg; //hit_before corresponds to scan points that hit something before encountering a particular grid cell
+  // hit_before_agg.resize(Ncells,0);
+  // std::vector<float> hit_after_agg; //hit_after corresponds to scan points that hit something after encountering a particular grid cell (including something inside that cell)
+  // hit_after_agg.resize(Ncells,0);
+  // std::vector<float> hit_inside_agg; //hit_inside corresponds to scan points that hit something within a particular grid cell.
+  // hit_inside_agg.resize(Ncells,0);
   
   //average G(theta)
   std::vector<float> Gtheta_bar;
@@ -1742,9 +1742,6 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
   // cell, scan, variable, value
   std::vector<std::vector<float>>  P_first_numerator_array(Ncells);
   std::vector<std::vector<float>>  P_first_denominator_array(Ncells);
-  
-  std::vector<std::vector<float>>  P_sequal_numerator_array(Ncells);
-  std::vector<std::vector<float>>  P_sequal_denominator_array(Ncells);
   
   std::vector<std::vector<float>>  P_equal_numerator_array(Ncells);
   std::vector<std::vector<float>>  P_equal_denominator_array(Ncells);
@@ -1911,8 +1908,6 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
       
       float P_first_numerator = 0;
       float P_first_denominator = 0;
-      float P_sequal_numerator = 0;
-      float P_sequal_denominator = 0;
       float P_equal_numerator = 0;
       float P_equal_denominator = 0;
       float P_intensity_numerator = 0;
@@ -2004,59 +1999,68 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
         
         // P_exact
         if(R_inside != 0 || R_after != 0 || R_miss != 0){ // only count this beam for P_exact if some energy made it to the voxel
-          P_exact_numerator += ((R_after + R_miss) / (R_before + R_inside + R_after + R_miss))*sin_theta;
-          P_exact_denominator += ((R_inside + R_after + R_miss) / (R_before + R_inside + R_after + R_miss))*sin_theta;
+          P_exact_numerator += ((R_after + R_miss) / (R_before + R_inside + R_after + R_miss));
+          P_exact_denominator += ((R_inside + R_after + R_miss) / (R_before + R_inside + R_after + R_miss));
+          // P_exact_numerator += ((R_after + R_miss) / (R_before + R_inside + R_after + R_miss))*sin_theta;
+          // P_exact_denominator += ((R_inside + R_after + R_miss) / (R_before + R_inside + R_after + R_miss))*sin_theta;
           voxel_beam_count++;
         }
         
         // P_ideal
         if(R_inside != 0 || R_after != 0){ // only count this beam for P_ideal if some energy hit inside or after the voxel (not including misses)
-          P_ideal_numerator += (R_after / (R_before + R_inside + R_after))*sin_theta;
-          P_ideal_denominator += ((R_inside + R_after) / (R_before + R_inside + R_after))*sin_theta;
+          P_ideal_numerator += (R_after / (R_before + R_inside + R_after));
+          P_ideal_denominator += ((R_inside + R_after) / (R_before + R_inside + R_after));
+          // P_ideal_numerator += (R_after / (R_before + R_inside + R_after))*sin_theta;
+          // P_ideal_denominator += ((R_inside + R_after) / (R_before + R_inside + R_after))*sin_theta;
         }else if(R_inside == 0 && R_after == 0 && R_before == 0 && R_miss != 0){ // also count this beam if all the energy missed (but still went through the voxel)
-          P_ideal_numerator += 1*sin_theta;
-          P_ideal_denominator += 1*sin_theta;
+          P_ideal_numerator += 1;
+          P_ideal_denominator += 1;
+          // P_ideal_numerator += 1*sin_theta;
+          // P_ideal_denominator += 1*sin_theta;
         }
         
         // P_intensity
         if(I_inside != 0 || I_after != 0){ // only count this beam for P_intensity if some energy hit inside or after the voxel (not including misses)
-          P_intensity_numerator += (I_after / (I_before + I_inside + I_after))*sin_theta;
-          P_intensity_denominator += ((I_inside + I_after) / (I_before + I_inside + I_after))*sin_theta;
-       // }else if(I_inside == 0 && I_after == 0 && I_before == 0 && I_miss != 0){ // also count this beam if all the energy missed (but still went through the voxel)
-        // This change was made in response to a change in [1.2.60] 2023-06-03 that set the intensity of miss points to zero
-        // it was causing total misses not to be counted at all for the intensity method. 
-        // this caused large underestimates of transmission and large overestimates of LAD
-        // so here we check if there is a miss hitpoint instead of non-zero miss intensity (which is zero now)
+          P_intensity_numerator += (I_after / (I_before + I_inside + I_after));
+          P_intensity_denominator += ((I_inside + I_after) / (I_before + I_inside + I_after));
+          // P_intensity_numerator += (I_after / (I_before + I_inside + I_after))*sin_theta;
+          // P_intensity_denominator += ((I_inside + I_after) / (I_before + I_inside + I_after))*sin_theta;
+          // }else if(I_inside == 0 && I_after == 0 && I_before == 0 && I_miss != 0){ // also count this beam if all the energy missed (but still went through the voxel)
+          // This change was made in response to a change in [1.2.60] 2023-06-03 that set the intensity of miss points to zero
+          // it was causing total misses not to be counted at all for the intensity method. 
+          // this caused large underestimates of transmission and large overestimates of LAD
+          // so here we check if there is a miss hitpoint instead of non-zero miss intensity (which is zero now)
         }else if(I_inside == 0 && I_after == 0 && I_before == 0 && E_miss != 0){ // also count this beam if all the energy missed (but still went through the voxel)
-          P_intensity_numerator += 1*sin_theta;
-          P_intensity_denominator += 1*sin_theta;
+          P_intensity_numerator += 1;
+          P_intensity_denominator += 1;
+          // P_intensity_numerator += 1*sin_theta;
+          // P_intensity_denominator += 1*sin_theta;
         }
         
         // P_equal
         if(E_inside != 0 || E_after != 0){ // only count for P_equal if some hit points were inside or after the voxel
-          P_equal_numerator += (E_after / (E_before + E_inside + E_after))*sin_theta;
-          P_equal_denominator += ((E_inside + E_after) / (E_before + E_inside + E_after))*sin_theta;
+          P_equal_numerator += (E_after / (E_before + E_inside + E_after));
+          P_equal_denominator += ((E_inside + E_after) / (E_before + E_inside + E_after));
+          // P_equal_numerator += (E_after / (E_before + E_inside + E_after))*sin_theta;
+          // P_equal_denominator += ((E_inside + E_after) / (E_before + E_inside + E_after))*sin_theta;
         }else if(E_inside == 0 && E_after == 0 && E_before == 0 && E_miss != 0){ // also count this beam if there is only a "hitpoint" that missed (far after the voxel)
-          P_equal_numerator += 1*sin_theta;
-          P_equal_denominator += 1*sin_theta;
-        }
-        
-        // P_sequal
-        if(E_inside != 0 || E_after != 0){ // only count for P_sequal if some hit points were inside or after the voxel
-          P_sequal_numerator += E_after / (E_inside + E_after);
-          P_sequal_denominator += 1;
-        }else if(E_inside == 0 && E_after == 0 && E_before == 0 && E_miss != 0){ // also count this beam if there is only a "hitpoint" that missed (far after the voxel)
-          P_sequal_numerator += 1;
-          P_sequal_denominator += 1;
+          // P_equal_numerator += 1*sin_theta;
+          // P_equal_denominator += 1*sin_theta;
+          P_equal_numerator += 1;
+          P_equal_denominator += 1;
         }
         
         // P_first
         if(E_before == 0 && (E_inside != 0 || E_after != 0)){ // only count for P_first if some hit points were inside or after the voxel
-          P_first_numerator += W*sin_theta;
-          P_first_denominator += 1*sin_theta;
+          P_first_numerator += W;
+          P_first_denominator += 1;
+          // P_first_numerator += W*sin_theta;
+          // P_first_denominator += 1*sin_theta;
         }else if(E_inside == 0 && E_after == 0 && E_before == 0 && E_miss != 0){ // also count this beam if there is only a "hitpoint" that missed (far after the voxel)
-          P_first_numerator += 1*sin_theta;
-          P_first_denominator += 1*sin_theta;
+          P_first_numerator += 1;
+          P_first_denominator += 1;
+          // P_first_numerator += 1*sin_theta;
+          // P_first_denominator += 1*sin_theta;
         }
         
         
@@ -2066,9 +2070,6 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
       
       P_first_numerator_array.at(c).push_back(P_first_numerator);
       P_first_denominator_array.at(c).push_back(P_first_denominator);
-      
-      P_sequal_numerator_array.at(c).push_back(P_sequal_numerator);
-      P_sequal_denominator_array.at(c).push_back(P_sequal_denominator);
       
       P_equal_numerator_array.at(c).push_back(P_equal_numerator);
       P_equal_denominator_array.at(c).push_back(P_equal_denominator);
@@ -2084,8 +2085,8 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
       
       voxel_beam_count_array.at(c).push_back(voxel_beam_count);
       
-      hit_before_agg.at(c) += *hit_before;
-      hit_after_agg.at(c) += *hit_after;
+      // hit_before_agg.at(c) += *hit_before;
+      // hit_after_agg.at(c) += *hit_after;
       
       for( size_t i=0; i<Nhits; i++ ){
         if( dr[i]>0.f ){
@@ -2110,7 +2111,6 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
   }//end scan loop
   
   std::vector<float> P_first(Ncells);
-  std::vector<float> P_sequal(Ncells);
   std::vector<float> P_equal(Ncells);
   std::vector<float> P_intensity(Ncells);
   std::vector<float> P_ideal(Ncells);
@@ -2124,9 +2124,6 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
     
     float P_first_numerator_array_agg = 0;
     float P_first_denominator_array_agg = 0;
-    
-    float P_sequal_numerator_array_agg = 0;
-    float P_sequal_denominator_array_agg = 0;
     
     float P_equal_numerator_array_agg = 0;
     float P_equal_denominator_array_agg = 0;
@@ -2148,9 +2145,6 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
       P_first_numerator_array_agg += P_first_numerator_array.at(c).at(s);
       P_first_denominator_array_agg += P_first_denominator_array.at(c).at(s);
       
-      P_sequal_numerator_array_agg += P_sequal_numerator_array.at(c).at(s);
-      P_sequal_denominator_array_agg += P_sequal_denominator_array.at(c).at(s);
-      
       P_equal_numerator_array_agg += P_equal_numerator_array.at(c).at(s);
       P_equal_denominator_array_agg += P_equal_denominator_array.at(c).at(s);
       
@@ -2167,7 +2161,6 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
     
     
     P_first[c] = P_first_numerator_array_agg / P_first_denominator_array_agg ;
-    P_sequal[c] = P_sequal_numerator_array_agg / P_sequal_denominator_array_agg ;
     P_equal[c] = P_equal_numerator_array_agg / P_equal_denominator_array_agg ;
     P_intensity[c] = P_intensity_numerator_array_agg / P_intensity_denominator_array_agg ;
     P_ideal[c] = P_ideal_numerator_array_agg / P_ideal_denominator_array_agg ;
@@ -2176,7 +2169,6 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
     if( printmessages ){
       std::cout << "Cell " << c << ", voxel_beam_count = " << voxel_beam_count_tot[c]  << std::endl;
       std::cout << "Cell " << c << ", P_first = " << P_first[c] << std::endl;
-      std::cout << "Cell " << c << ", P_sequal = " << P_sequal[c] << std::endl;
       std::cout << "Cell " << c << ", P_equal = " << P_equal[c] << std::endl;
       std::cout << "Cell " << c << ", P_intensity = " << P_intensity[c] << std::endl;
       std::cout << "Cell " << c << ", P_ideal = " << P_ideal[c] << std::endl;
@@ -2195,17 +2187,17 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
   } //end of loop through cells to aggregate all scans
   
   
-  /// old code in original calculateLeafAreaGPU_testing() ... do we need to keep this??
-  //----------- Calculate number of hits in voxels -------------- //
-  
-  //figure out hits for all scans
-  for( size_t r=0; r< getHitCount(); r++ ){
-    if( getHitGridCell(r)>=0 ){
-      helios::vec3 direction = getHitXYZ(r)-getScanOrigin(getHitScanID(r));
-      direction.normalize();
-      hit_inside_agg.at(getHitGridCell(r)) += sin(acos_safe(direction.z));
-    }
-  }
+  // /// old code in original calculateLeafAreaGPU_testing() ... do we need to keep this??
+  // //----------- Calculate number of hits in voxels -------------- //
+  // 
+  // //figure out hits for all scans
+  // for( size_t r=0; r< getHitCount(); r++ ){
+  //   if( getHitGridCell(r)>=0 ){
+  //     helios::vec3 direction = getHitXYZ(r)-getScanOrigin(getHitScanID(r));
+  //     direction.normalize();
+  //     hit_inside_agg.at(getHitGridCell(r)) += sin(acos_safe(direction.z));
+  //   }
+  // }
   
   //---------------------- Calculate G(theta) from triangulation --------------------------//
   
@@ -2335,7 +2327,6 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
   // perform LAD inversion using reference Gtheta
   std::vector<float> LAD_refcheck_Gref = LAD_inversion(P_ref, Gtheta_ref, dr_array, fillAnalytic);
   std::vector<float> LAD_first_Gref = LAD_inversion(P_first, Gtheta_ref, dr_array, fillAnalytic);
-  std::vector<float> LAD_sequal_Gref = LAD_inversion(P_sequal, Gtheta_ref, dr_array, fillAnalytic);
   std::vector<float> LAD_equal_Gref = LAD_inversion(P_equal, Gtheta_ref, dr_array, fillAnalytic);
   std::vector<float> LAD_intensity_Gref = LAD_inversion(P_intensity, Gtheta_ref, dr_array, fillAnalytic);
   std::vector<float> LAD_ideal_Gref = LAD_inversion(P_ideal, Gtheta_ref, dr_array, fillAnalytic);
@@ -2344,7 +2335,6 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
   // perform LAD inversion using triangulation-estimated Gtheta
   std::vector<float> LAD_refcheck = LAD_inversion(P_ref, Gtheta, dr_array, fillAnalytic);
   std::vector<float> LAD_first = LAD_inversion(P_first, Gtheta, dr_array, fillAnalytic);
-  std::vector<float> LAD_sequal = LAD_inversion(P_sequal, Gtheta, dr_array, fillAnalytic);
   std::vector<float> LAD_equal = LAD_inversion(P_equal, Gtheta, dr_array, fillAnalytic);
   std::vector<float> LAD_intensity = LAD_inversion(P_intensity, Gtheta, dr_array, fillAnalytic);
   std::vector<float> LAD_ideal = LAD_inversion(P_ideal, Gtheta, dr_array, fillAnalytic);
@@ -2362,7 +2352,6 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
     if( printmessages ){
       std::cout << "Cell " << c << ", voxel_beam_count = " << voxel_beam_count_tot[c]  << std::endl;
       std::cout << "Cell " << c << ", P_first = " << P_first[c] << std::endl;
-      std::cout << "Cell " << c << ", P_sequal = " << P_sequal[c] << std::endl;
       std::cout << "Cell " << c << ", P_equal = " << P_equal[c] << std::endl;
       std::cout << "Cell " << c << ", P_intensity = " << P_intensity[c] << std::endl;
       std::cout << "Cell " << c << ", P_exact = " << P_exact[c] << std::endl;
@@ -2398,14 +2387,14 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
   // output the voxel level variables
   std::ofstream file_output;
   file_output.open("../voxeloutput/voxeloutput.txt");
-  file_output << "cell, grid_center_x, grid_center_y, grid_center_z, grid_size_x, grid_size_y, grid_size_z, Nbeams, LAD_ref, G_ref, dr_bar, dr_var, P_ref, G, P_first, P_sequal, P_equal, P_intensity, P_ideal, P_exact, LADGref_refcheck, LADGref_first, LADGref_sequal, LADGref_equal, LADGref_intensity, LADGref_ideal, LADGref_exact, LAD_refcheck, LAD_first, LAD_sequal, LAD_equal, LAD_intensity, LAD_ideal, LAD_exact"  << std::endl;
+  file_output << "cell, grid_center_x, grid_center_y, grid_center_z, grid_size_x, grid_size_y, grid_size_z, Nbeams, LAD_ref, G_ref, dr_bar, dr_var, P_ref, G, P_first, P_equal, P_intensity, P_ideal, P_exact, LADGref_refcheck, LADGref_first, LADGref_equal, LADGref_intensity, LADGref_ideal, LADGref_exact, LAD_refcheck, LAD_first, LAD_equal, LAD_intensity, LAD_ideal, LAD_exact"  << std::endl;
   
   for(uint c=0; c<Ncells; c++)
   {
     helios::vec3 grid_size = getCellSize(c);
     helios::vec3 grid_center = getCellCenter(c);
     
-    file_output << c << "," << grid_center.x << "," << grid_center.y << "," << grid_center.z << "," << grid_size.x << "," << grid_size.y << "," << grid_size.z << "," << voxel_beam_count_tot.at(c) << "," << LA_ref[c]/(grid_size.x*grid_size.y*grid_size.z) << "," << Gtheta_ref[c] << "," << dr_bar_ref[c] << "," << dr_var_ref[c] << "," << P_ref[c] << "," << Gtheta[c] << "," << P_first[c] << "," << P_sequal[c] << "," << P_equal[c] << ","  << P_intensity[c] << "," << P_ideal[c] << "," << P_exact[c] << "," << LAD_refcheck_Gref[c] << "," << LAD_first_Gref[c] << "," << LAD_sequal_Gref[c] << "," << LAD_equal_Gref[c] << "," << LAD_intensity_Gref[c] << "," << LAD_ideal_Gref[c] << "," << LAD_exact_Gref[c] << "," << LAD_refcheck[c] << "," << LAD_first[c] << "," << LAD_sequal[c] << "," << LAD_equal[c] << "," << LAD_intensity[c] << "," << LAD_ideal[c] << "," << LAD_exact[c] << std::endl;
+    file_output << c << "," << grid_center.x << "," << grid_center.y << "," << grid_center.z << "," << grid_size.x << "," << grid_size.y << "," << grid_size.z << "," << voxel_beam_count_tot.at(c) << "," << LA_ref[c]/(grid_size.x*grid_size.y*grid_size.z) << "," << Gtheta_ref[c] << "," << dr_bar_ref[c] << "," << dr_var_ref[c] << "," << P_ref[c] << "," << Gtheta[c] << "," << P_first[c] << "," << P_equal[c] << ","  << P_intensity[c] << "," << P_ideal[c] << "," << P_exact[c] << "," << LAD_refcheck_Gref[c] << "," << LAD_first_Gref[c] << "," << LAD_equal_Gref[c] << "," << LAD_intensity_Gref[c] << "," << LAD_ideal_Gref[c] << "," << LAD_exact_Gref[c] << "," << LAD_refcheck[c] << "," << LAD_first[c] << "," << LAD_equal[c] << "," << LAD_intensity[c] << "," << LAD_ideal[c] << "," << LAD_exact[c] << std::endl;
   }
   file_output.close();
   
@@ -3189,7 +3178,7 @@ void LiDARcloud::syntheticScan( helios::Context* context, int rays_per_pulse, fl
     return;
   }
   
-  float miss_distance = 1e5;  //arbitrary distance from scanner for 'miss' points
+  float miss_distance = 1001.0;  //arbitrary distance from scanner for 'miss' points
   
   float3 bb_center;
   float3 bb_size;
@@ -3584,7 +3573,7 @@ void LiDARcloud::syntheticScan( helios::Context* context, int rays_per_pulse, fl
       //looping over rays in each beam
       for( size_t p=0; p<Npulse; p++ ){
         
-        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1e6)
+        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1001.0)
         float i = hit_fnorm[r*Npulse+p]; //dot product between beam direction and primitive normal
         float ID = float(hit_ID[r*Npulse+p]);   //ID of intersected primitive
         
@@ -3780,7 +3769,7 @@ void LiDARcloud::syntheticScan_UUID_grouping( helios::Context* context, int rays
     return;
   }
   
-  float miss_distance = 1e5;  //arbitrary distance from scanner for 'miss' points
+  float miss_distance = 1001.0;  //arbitrary distance from scanner for 'miss' points
   
   float3 bb_center;
   float3 bb_size;
@@ -4175,7 +4164,7 @@ void LiDARcloud::syntheticScan_UUID_grouping( helios::Context* context, int rays
       //looping over rays in each beam
       for( size_t p=0; p<Npulse; p++ ){
         
-        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1e6)
+        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1001.0)
         float i = hit_fnorm[r*Npulse+p]; //dot product between beam direction and primitive normal
         float ID = float(hit_ID[r*Npulse+p]);   //ID of intersected primitive
         
@@ -4394,7 +4383,7 @@ void LiDARcloud::syntheticScan_delta_distance_grouping( helios::Context* context
     return;
   }
   
-  float miss_distance = 1e5;  //arbitrary distance from scanner for 'miss' points
+  float miss_distance = 1001.0;  //arbitrary distance from scanner for 'miss' points
   
   float3 bb_center;
   float3 bb_size;
@@ -4789,7 +4778,7 @@ void LiDARcloud::syntheticScan_delta_distance_grouping( helios::Context* context
       //looping over rays in each beam
       for( size_t p=0; p<Npulse; p++ ){
         
-        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1e6)
+        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1001.0)
         float i = hit_fnorm[r*Npulse+p]; //dot product between beam direction and primitive normal
         float ID = float(hit_ID[r*Npulse+p]);   //ID of intersected primitive
         
@@ -4836,7 +4825,7 @@ void LiDARcloud::syntheticScan_delta_distance_grouping( helios::Context* context
           peak_values.push_back(t_pulse.at(peaks.at(jj)).at(0));
           // std::cout << peaks.at(jj) << ", " << t_pulse.at(peaks.at(jj)).at(0) << std::endl;
         }
-        peak_values.push_back(1e6);
+        peak_values.push_back(1001.0);
         
         float d=t_pulse.at(0).at(0);
         float f=t_pulse.at(0).at(1);
@@ -5010,7 +4999,7 @@ void LiDARcloud::syntheticScan_delta_distance_Tpd_grouping( helios::Context* con
     return;
   }
   
-  float miss_distance = 1e5;  //arbitrary distance from scanner for 'miss' points
+  float miss_distance = 1001.0;  //arbitrary distance from scanner for 'miss' points
   
   float3 bb_center;
   float3 bb_size;
@@ -5407,7 +5396,7 @@ void LiDARcloud::syntheticScan_delta_distance_Tpd_grouping( helios::Context* con
       //looping over rays in each beam
       for( size_t p=0; p<Npulse; p++ ){
         
-        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1e6)
+        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1001.0)
         float i = hit_fnorm[r*Npulse+p]; //dot product between beam direction and primitive normal
         float ID = float(hit_ID[r*Npulse+p]);   //ID of intersected primitive
         
@@ -5454,7 +5443,7 @@ void LiDARcloud::syntheticScan_delta_distance_Tpd_grouping( helios::Context* con
           peak_values.push_back(t_pulse.at(peaks.at(jj)).at(0));
           // std::cout << peaks.at(jj) << ", " << t_pulse.at(peaks.at(jj)).at(0) << std::endl;
         }
-        peak_values.push_back(1e6);
+        peak_values.push_back(1001.0);
         
         float d=t_pulse.at(0).at(0);
         float f=t_pulse.at(0).at(1);
@@ -5678,7 +5667,7 @@ void LiDARcloud::syntheticScan_Tpd_alt( helios::Context* context, int rays_per_p
     return;
   }
   
-  float miss_distance = 1e5;  //arbitrary distance from scanner for 'miss' points
+  float miss_distance = 1001.0;  //arbitrary distance from scanner for 'miss' points
   
   float3 bb_center;
   float3 bb_size;
@@ -6073,7 +6062,7 @@ void LiDARcloud::syntheticScan_Tpd_alt( helios::Context* context, int rays_per_p
       //looping over rays in each beam
       for( size_t p=0; p<Npulse; p++ ){
         
-        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1e6)
+        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1001.0)
         float i = hit_fnorm[r*Npulse+p]; //dot product between beam direction and primitive normal
         float ID = float(hit_ID[r*Npulse+p]);   //ID of intersected primitive
         
@@ -6269,7 +6258,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
     return;
   }
   
-  float miss_distance = 1e5;  //arbitrary distance from scanner for 'miss' points
+  float miss_distance = 1001.0;  //arbitrary distance from scanner for 'miss' points
   
   float3 bb_center;
   float3 bb_size;
@@ -6615,9 +6604,6 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
     float* hit_fnorm = (float*)malloc(N*Npulse * sizeof(float)); //allocate host memory
     for( int i=0; i<N*Npulse; i++ ){
       hit_fnorm[i] = 1e6;
-      // hit_fnorm[i] = 0.0;
-      //ERK
-      
     }
     CUDA_CHECK_ERROR( cudaMemcpy(d_hit_fnorm, hit_fnorm, N*Npulse*sizeof(float), cudaMemcpyHostToDevice) );
     
@@ -6674,9 +6660,9 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
     //looping over beams
     for( size_t r=0; r<N; r++ ){
       
-      std::cout << "*******************************************************************************" << std::endl;
-      std::cout << "Beam " << r << " of " << N << std::endl;
-      
+      // std::cout << "*******************************************************************************" << std::endl;
+      // std::cout << "Beam " << r << " of " << N << std::endl;
+      // 
       std::vector<std::vector<float> > t_pulse;
       std::vector<std::vector<float> > t_hit;
       std::vector<std::vector<float> > t_hit_initial;
@@ -6689,7 +6675,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
       //looping over rays in the beam
       for( size_t p=0; p<Npulse; p++ ){
         
-        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1e6)
+        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1001.0)
         float i = hit_fnorm[r*Npulse+p]; //dot product between beam direction and primitive normal
         
         // if(tc < 30)
@@ -6747,13 +6733,15 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
              break;
            }else if(d >= max_bin){
              //if the ray distance is past the max bin, put it in the last bin
-             histogram_values_intensity.at(last_bin_index) = histogram_values_intensity.at(last_bin_index) + f;
+             // histogram_values_intensity.at(last_bin_index) = histogram_values_intensity.at(last_bin_index) + f; //don't do this so that intensity for these stays as zero
              histogram_values_count.at(last_bin_index) = histogram_values_count.at(last_bin_index) + 1;
              histogram_values_UUID.at(last_bin_index) = t_pulse.at(hit).at(2);
              break;
            }
          }
        }
+       
+       //if the last bin (used for partial misses) has any rays in it
        
        // print out the counts histogram values
        int tc2 = 0;
@@ -6767,7 +6755,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
                {
                  std::cout << "|| " << zero_count << " bins with zero ||, ";
                }
-               
+
                if(tc2 < 60)
                {
                  std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], ";
@@ -6776,7 +6764,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
                  std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], "  << std::endl;
                  tc2 = 0;
                }
-               
+
          }else{
                zero_count++;
           }
@@ -6821,7 +6809,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
        {
          std::cout << histogram_values_intensity.at(peaks.at(pk)) << "(" << histogram_values_count.at(peaks.at(pk)) << ")[" << peaks.at(pk) << "], ";
        }
-       
+       // 
        // std::cout << std::endl;
        // std::cout << "histogram_values_intensity.size() = " << histogram_values_intensity.size() << std::endl;
        // // std::cout << "max = " << max(histogram_values_intensity) << std::endl;
@@ -6873,10 +6861,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
            split_points.push_back(split_points_temp.at(pk) + peaks.at(pk));
            
          }
-         // // add the last element
-         // split_points.push_back(last_bin_index);
-         // 
-        
+
          std::vector<uint> split_points_start = split_points;
          split_points_start.insert (split_points_start.begin(), 0);
          
@@ -6916,6 +6901,20 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
          float IDmap = histogram_values_UUID.at(peaks.at(peaks.size()-1));
          std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(3)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
          t_hit_initial.push_back( v );
+         
+         
+         //if there were any rays that hit in the last bin (partial misses) add that as another hit point
+         if(histogram_values_count.at(last_bin_index) > 0)
+         {
+           // assume that all rays in a bin are at the mid-way point of the bin
+           float distance = miss_distance;
+           float intensity = 0.0;
+           float nPulseHit = float(histogram_values_count.at(last_bin_index));
+           float IDmap = histogram_values_UUID.at(last_bin_index);
+           std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(3)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+           t_hit_initial.push_back( v );
+         }
+         
          
          // // add the last bin to catch misses
          // float distance = max_distance;
@@ -6983,7 +6982,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
         
         Nhits++;
       }
-      std::cout << "after adding hit points" << std::endl;
+      // std::cout << "after adding hit points" << std::endl;
       
     }
     
@@ -7048,7 +7047,7 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
     return;
   }
   
-  float miss_distance = 1e5;  //arbitrary distance from scanner for 'miss' points
+  float miss_distance = 1001.0;  //arbitrary distance from scanner for 'miss' points
   
   float3 bb_center;
   float3 bb_size;
@@ -7446,7 +7445,7 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
     
     
     float max_bin = bin_width*float(last_bin_index);
-    std::cout << "max_bin = " << max_bin << std::endl; 
+    // std::cout << "max_bin = " << max_bin << std::endl; 
     
     
     //looping over beams
@@ -7463,7 +7462,7 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
       //looping over rays in each beam
       for( size_t p=0; p<Npulse; p++ ){
         
-        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1e6)
+        float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1001.0)
         float i = hit_fnorm[r*Npulse+p]; //dot product between beam direction and primitive normal
         float ID = float(hit_ID[r*Npulse+p]);   //ID of intersected primitive
         
@@ -7512,7 +7511,7 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
             }else if(d >= max_bin){
               //else if the ray intersects at a distance farther from the max defined bin, 
               // but it in the last bin
-              histogram_values_intensity.at(last_bin_index) = histogram_values_intensity.at(last_bin_index) + f;
+              // histogram_values_intensity.at(last_bin_index) = histogram_values_intensity.at(last_bin_index) + f;
               histogram_values_count.at(last_bin_index) = histogram_values_count.at(last_bin_index) + 1;
               histogram_values_UUID.at(last_bin_index) = t_pulse.at(hit).at(2);
               break;
@@ -7611,18 +7610,19 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
           std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(3)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
           t_hit_initial.push_back( v );
           
-          // // add the last bin to catch misses
-          // if(histogram_values_count.at(last_bin_index) > 0)
-          // {
-          // 
-          //   float distance = max_distance;
-          //   float intensity = 0.0;
-          //   float nPulseHit = float(histogram_values_count.at(last_bin_index));
-          //   float IDmap = -999999;
-          //   std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(3)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
-          //   t_hit_initial.push_back( v );
-          // }
-
+          
+          //if there were any rays that hit in the last bin (partial misses) add that as another hit point
+          if(histogram_values_count.at(last_bin_index) > 0)
+          {
+            // assume that all rays in a bin are at the mid-way point of the bin
+            float distance = miss_distance;
+            float intensity = 0.0;
+            float nPulseHit = float(histogram_values_count.at(last_bin_index));
+            float IDmap = histogram_values_UUID.at(last_bin_index);
+            std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(3)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+            t_hit_initial.push_back( v );
+          }
+          
           
         }
         
@@ -7630,28 +7630,41 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
       // now see if we need to merge any hits
       
       float d0 = t_hit_initial.at(0).at(0);
-      float f0 = t_hit_initial.at(0).at(1);
+      float df = t_hit_initial.at(0).at(0)*t_hit_initial.at(0).at(1); // distance * intensity used for the weighted distance calculation when merging hitpoints
+      float f = t_hit_initial.at(0).at(1);
       float nr = float(t_hit_initial.at(0).at(2));
-      
+
       //loop over hit points
       for( size_t hit=1; hit<=t_hit_initial.size(); hit++ ){
         
+        
         // if the end has been reached, output the last hitpoint
-        if( hit == t_hit_initial.size()){
+        if( hit == t_hit_initial.size() ){
           
-          float distance = d0;
-          float intensity = f0;
-          float nPulseHit = float(nr);
-          float IDmap = t_hit_initial.at(hit-1).at(3);
-          
-          std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
-          t_hit.push_back( v );
+          if(t_hit_initial.at(hit-1).at(0) >= max_bin)
+          {
+            float distance = miss_distance;
+            float intensity = 0.0;
+            float nPulseHit = float(t_hit_initial.at(hit-1).at(2));
+            float IDmap = t_hit_initial.at(hit-1).at(3);
+            
+            std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+            t_hit.push_back( v );
+          }else{
+            float distance = df/f;
+            float intensity = f;
+            float nPulseHit = float(nr);
+            float IDmap = t_hit_initial.at(hit-1).at(3);
+            
+            std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+            t_hit.push_back( v );
+          }
           
           // else if the current hit is more than the pulse threshold distance from t0,  it is part of the next hitpoint so output the previous hitpoint and reset
         }else if( t_hit_initial.at(hit).at(0)-d0 > pulse_distance_threshold ){
           
-          float distance = d0;
-          float intensity = f0;
+          float distance = df/f;
+          float intensity = f;
           float nPulseHit = float(nr);
           float IDmap = t_hit_initial.at(hit-1).at(3);
           
@@ -7660,15 +7673,17 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
           t_hit.push_back( v );
           
           d0 = t_hit_initial.at(hit).at(0);
-          f0 = t_hit_initial.at(hit).at(1);
+          df = t_hit_initial.at(hit).at(0)*t_hit_initial.at(hit).at(1);
+          f = t_hit_initial.at(hit).at(1);
           nr = float(t_hit_initial.at(hit).at(2));
           
           // or else the current hit point is less than pulse threshold from the previous one and is part of current hitpoint; add it to the current hit point and continue on
         }else{
           
           // the new mean distance for the hit point weighted by intensity
-          d0 = (d0*f0 + t_hit_initial.at(hit).at(0)*t_hit_initial.at(hit).at(1))/(f0 + t_hit_initial.at(hit).at(1));
-          f0 = f0 + t_hit_initial.at(hit).at(1);
+          df = df + (t_hit_initial.at(hit).at(0)*t_hit_initial.at(hit).at(1));
+          // d = (d*f + t_hit_initial.at(hit).at(0)*t_hit_initial.at(hit).at(1))/(f + t_hit_initial.at(hit).at(1));
+          f = f + t_hit_initial.at(hit).at(1);
           nr = nr + float(t_hit_initial.at(hit).at(2));
         }
         
