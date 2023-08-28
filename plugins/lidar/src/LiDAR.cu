@@ -6905,7 +6905,8 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
          
          float hp_intensity = 0;
          int hp_raycount = 0;
-         for(uint iii=split_points_start.at(split_points.size());iii <= last_bin_index;iii++)
+         //ERK
+         for(uint iii=split_points_start.at(split_points.size());iii < last_bin_index;iii++)
          {
            hp_intensity = hp_intensity +  histogram_values_intensity.at(iii);
            hp_raycount = hp_raycount +  histogram_values_count.at(iii);
@@ -6947,9 +6948,9 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
 
       }
        
-      float d0 = t_hit_initial.at(0).at(0);
-      float f0 = t_hit_initial.at(0).at(1);
-      float nr = float(t_hit_initial.at(0).at(2));
+      // float d0 = t_hit_initial.at(0).at(0);
+      // float f0 = t_hit_initial.at(0).at(1);
+      // float nr = float(t_hit_initial.at(0).at(2));
       
       t_hit = t_hit_initial;
       
@@ -7627,7 +7628,7 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
           
           float hp_intensity = 0;
           int hp_raycount = 0;
-          for(uint iii=split_points_start.at(split_points.size());iii <= last_bin_index;iii++)
+          for(uint iii=split_points_start.at(split_points.size());iii < last_bin_index;iii++)
           {
             hp_intensity = hp_intensity +  histogram_values_intensity.at(iii);
             hp_raycount = hp_raycount +  histogram_values_count.at(iii);
