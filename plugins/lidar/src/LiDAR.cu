@@ -1974,6 +1974,7 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
             }
           }else if(hit_location[i] == 4){
             R_miss = R_miss +  getHitData(this_scan_index[i], "nRaysHit");
+            // if(getHitData(this_scan_index[i], "nRaysHit") == )
             I_miss = I_miss + getHitData(this_scan_index[i], "intensity");
             E_miss ++;
           } // or this hitpoint / beam did not intersect the voxel and should not be added to the total number of beams for this voxel
@@ -3589,7 +3590,7 @@ void LiDARcloud::syntheticScan( helios::Context* context, int rays_per_pulse, fl
         float distance = t_pulse.front().at(0);
         float intensity = t_pulse.front().at(1);
         if( distance>=0.98f*miss_distance ){
-          intensity=0;
+          intensity=1.0;
         }
         float nPulseHit = 1;
         float IDmap = t_pulse.front().at(2);
@@ -3620,8 +3621,17 @@ void LiDARcloud::syntheticScan( helios::Context* context, int rays_per_pulse, fl
             float nPulseHit = float(count);
             float IDmap = t_pulse.at(hit-1).at(2);
             
-            std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
-            t_hit.push_back( v );
+            //test for full misses and set those to have intensity = 1
+            if(nPulseHit == Npulse & distance >= 0.98f*miss_distance)
+            {
+              std::vector<float> v{distance, 1.0, nPulseHit, IDmap}; //included the ray count here
+              //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+              t_hit.push_back( v );
+            }else{
+              std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //included the ray count here
+              //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+              t_hit.push_back( v );
+            }
             
             // else if the current ray is more than the pulse threshold distance from t0,  it is part of the next hitpoint so output the previous hitpoint and reset
           }else if( t_pulse.at(hit).at(0)-t0>pulse_distance_threshold ){
@@ -3634,9 +3644,18 @@ void LiDARcloud::syntheticScan( helios::Context* context, int rays_per_pulse, fl
             float nPulseHit = float(count);
             float IDmap = t_pulse.at(hit-1).at(2);
             
-            std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //included the ray count here
-            //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
-            t_hit.push_back( v );
+            //test for full misses and set those to have intensity = 1
+            if(nPulseHit == Npulse & distance >= 0.98f*miss_distance)
+            {
+              std::vector<float> v{distance, 1.0, nPulseHit, IDmap}; //included the ray count here
+              //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+              t_hit.push_back( v );
+            }else{
+              std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //included the ray count here
+              //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+              t_hit.push_back( v );
+            }
+
             
             count=1;
             d=t_pulse.at(hit).at(0);
@@ -6078,7 +6097,7 @@ void LiDARcloud::syntheticScan_Tpd_alt( helios::Context* context, int rays_per_p
         float distance = t_pulse.front().at(0);
         float intensity = t_pulse.front().at(1);
         if( distance>=0.98f*miss_distance ){
-          intensity=0;
+          intensity=1.0;
         }
         float nPulseHit = 1;
         float IDmap = t_pulse.front().at(2);
@@ -6109,8 +6128,17 @@ void LiDARcloud::syntheticScan_Tpd_alt( helios::Context* context, int rays_per_p
             float nPulseHit = float(count);
             float IDmap = t_pulse.at(hit-1).at(2);
             
-            std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
-            t_hit.push_back( v );
+            //test for full misses and set those to have intensity = 1
+            if(nPulseHit == Npulse & distance >= 0.98f*miss_distance)
+            {
+              std::vector<float> v{distance, 1.0, nPulseHit, IDmap}; //included the ray count here
+              //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+              t_hit.push_back( v );
+            }else{
+              std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //included the ray count here
+              //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+              t_hit.push_back( v );
+            }
             
             // else if the current ray is more than the pulse threshold distance from t0,  it is part of the next hitpoint so output the previous hitpoint and reset
           }else if( t_pulse.at(hit).at(0)-t0>pulse_distance_threshold ){
@@ -6123,9 +6151,17 @@ void LiDARcloud::syntheticScan_Tpd_alt( helios::Context* context, int rays_per_p
             float nPulseHit = float(count);
             float IDmap = t_pulse.at(hit-1).at(2);
             
-            std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //included the ray count here
-            //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
-            t_hit.push_back( v );
+            //test for full misses and set those to have intensity = 1
+            if(nPulseHit == Npulse & distance >= 0.98f*miss_distance)
+            {
+              std::vector<float> v{distance, 1.0, nPulseHit, IDmap}; //included the ray count here
+              //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+              t_hit.push_back( v );
+            }else{
+              std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //included the ray count here
+              //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+              t_hit.push_back( v );
+            }
             
             count=1;
             d=t_pulse.at(hit).at(0);
@@ -6702,7 +6738,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
         float distance = t_pulse.front().at(0);
         float intensity = t_pulse.front().at(1);
         if( distance>=0.98f*miss_distance ){
-          intensity=0;
+          intensity=1.0;
         }
         float nPulseHit = 1;
         float IDmap = t_pulse.front().at(2);
@@ -6772,7 +6808,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
        if(histogram_values_count.at(last_bin_index) == Npulse)
        { 
          float distance = miss_distance;
-         float intensity = 0.0;
+         float intensity = 1.0;
          float nPulseHit = histogram_values_count.at(last_bin_index);
          float IDmap = -99999;
          std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
@@ -7461,7 +7497,7 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
         float distance = t_pulse.front().at(0);
         float intensity = t_pulse.front().at(1);
         if( distance>=0.98f*miss_distance ){
-          intensity=0;
+          intensity=1.0;
         }
         float nPulseHit = 1;
         float IDmap = t_pulse.front().at(2);
@@ -7502,11 +7538,12 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
           }
         }
         
+        
         //check for a full miss before doing any peak finding
         if(histogram_values_count.at(last_bin_index) == Npulse)
         {
           float distance = miss_distance;
-          float intensity = 0.0;
+          float intensity = 1.0;
           float nPulseHit = histogram_values_count.at(last_bin_index);
           float IDmap = -99999;
           std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
@@ -7619,73 +7656,87 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
           
           
         }
+        
+        
+        
         }
         
-      // initial grouping is done.
-      // now see if we need to merge any hits
-      
-      float d0 = t_hit_initial.at(0).at(0);
-      float df = t_hit_initial.at(0).at(0)*t_hit_initial.at(0).at(1); // distance * intensity used for the weighted distance calculation when merging hitpoints
-      float f = t_hit_initial.at(0).at(1);
-      float nr = float(t_hit_initial.at(0).at(2));
-
-      //loop over hit points
-      for( size_t hit=1; hit<=t_hit_initial.size(); hit++ ){
-        
-        
-        // if the end has been reached, output the last hitpoint
-        if( hit == t_hit_initial.size() ){
+          // initial grouping is done.
+          // now see if we need to merge any hits
           
-          if(t_hit_initial.at(hit-1).at(0) >= max_bin)
-          {
-            float distance = miss_distance;
-            float intensity = 0.0;
-            float nPulseHit = float(t_hit_initial.at(hit-1).at(2));
-            float IDmap = t_hit_initial.at(hit-1).at(3);
+          float d0 = t_hit_initial.at(0).at(0);
+          float df = t_hit_initial.at(0).at(0)*t_hit_initial.at(0).at(1); // distance * intensity used for the weighted distance calculation when merging hitpoints
+          float f = t_hit_initial.at(0).at(1);
+          float nr = float(t_hit_initial.at(0).at(2));
+    
+          //loop over hit points
+          for( size_t hit=1; hit<=t_hit_initial.size(); hit++ ){
             
-            std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
-            t_hit.push_back( v );
-          }else{
-            float distance = df/f;
-            float intensity = f;
-            float nPulseHit = float(nr);
-            float IDmap = t_hit_initial.at(hit-1).at(3);
             
-            std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
-            t_hit.push_back( v );
+            // if the end has been reached, output the last hitpoint
+            if( hit == t_hit_initial.size() ){
+
+              if(t_hit_initial.at(hit-1).at(0) >= max_bin)
+              {
+                float distance = miss_distance;
+                float intensity = 0.0;
+                float nPulseHit = float(t_hit_initial.at(hit-1).at(2));
+                float IDmap = t_hit_initial.at(hit-1).at(3);
+                
+                
+                if(nPulseHit == Npulse & distance >= 0.98f*miss_distance)
+                {
+                  std::vector<float> v{distance, 1.0, nPulseHit, IDmap}; //included the ray count here
+                  //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+                  t_hit.push_back( v );
+                }else{
+                  std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //included the ray count here
+                  //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+                  t_hit.push_back( v );
+                }
+                
+              }else{
+                float distance = df/f;
+                float intensity = f;
+                float nPulseHit = float(nr);
+                float IDmap = t_hit_initial.at(hit-1).at(3);
+                
+                std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+                t_hit.push_back( v );
+              }
+              
+              // else if the current hit is more than the pulse threshold distance from t0,  it is part of the next hitpoint so output the previous hitpoint and reset
+            }else if( t_hit_initial.at(hit).at(0)-d0 > pulse_distance_threshold ){
+              
+              float distance = df/f;
+              float intensity = f;
+              float nPulseHit = float(nr);
+              float IDmap = t_hit_initial.at(hit-1).at(3);
+              
+              std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //included the ray count here
+              //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+              t_hit.push_back( v );
+              
+              d0 = t_hit_initial.at(hit).at(0);
+              df = t_hit_initial.at(hit).at(0)*t_hit_initial.at(hit).at(1);
+              f = t_hit_initial.at(hit).at(1);
+              nr = float(t_hit_initial.at(hit).at(2));
+              
+              // or else the current hit point is less than pulse threshold from the previous one and is part of current hitpoint; add it to the current hit point and continue on
+            }else{
+              
+              // the new mean distance for the hit point weighted by intensity
+              df = df + (t_hit_initial.at(hit).at(0)*t_hit_initial.at(hit).at(1));
+              // d = (d*f + t_hit_initial.at(hit).at(0)*t_hit_initial.at(hit).at(1))/(f + t_hit_initial.at(hit).at(1));
+              f = f + t_hit_initial.at(hit).at(1);
+              nr = nr + float(t_hit_initial.at(hit).at(2));
+            }
+            
           }
           
-          // else if the current hit is more than the pulse threshold distance from t0,  it is part of the next hitpoint so output the previous hitpoint and reset
-        }else if( t_hit_initial.at(hit).at(0)-d0 > pulse_distance_threshold ){
-          
-          float distance = df/f;
-          float intensity = f;
-          float nPulseHit = float(nr);
-          float IDmap = t_hit_initial.at(hit-1).at(3);
-          
-          std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //included the ray count here
-          //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
-          t_hit.push_back( v );
-          
-          d0 = t_hit_initial.at(hit).at(0);
-          df = t_hit_initial.at(hit).at(0)*t_hit_initial.at(hit).at(1);
-          f = t_hit_initial.at(hit).at(1);
-          nr = float(t_hit_initial.at(hit).at(2));
-          
-          // or else the current hit point is less than pulse threshold from the previous one and is part of current hitpoint; add it to the current hit point and continue on
-        }else{
-          
-          // the new mean distance for the hit point weighted by intensity
-          df = df + (t_hit_initial.at(hit).at(0)*t_hit_initial.at(hit).at(1));
-          // d = (d*f + t_hit_initial.at(hit).at(0)*t_hit_initial.at(hit).at(1))/(f + t_hit_initial.at(hit).at(1));
-          f = f + t_hit_initial.at(hit).at(1);
-          nr = nr + float(t_hit_initial.at(hit).at(2));
-        }
-        
-      }
+          }
       
-      }
-      
+
       
       
       float average=0;
