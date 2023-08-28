@@ -1894,7 +1894,7 @@ void LiDARcloud::calculateLeafAreaGPU_synthetic( helios::Context* context, bool 
         continue;
       }
       
-      float scanner_range = 5000.0;
+      float scanner_range = 1000.0;
       intersectGridcell_synthetic <<< dimGrid, dimBlock >>>( Nhits, origin, d_scan_xyz, d_scan_weight, center, anchor, size, rotation, d_dr, d_hit_before, d_hit_after, d_hit_location, scanner_range );
       
       cudaDeviceSynchronize();
