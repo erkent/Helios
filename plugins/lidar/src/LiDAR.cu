@@ -6693,6 +6693,9 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
     std::cout << "max_bin = " << max_bin << std::endl; 
     
     
+    uint boi = 1194670;
+    // std::cout << 
+    
     //looping over beams
     for( size_t r=0; r<N; r++ ){
       
@@ -6714,6 +6717,8 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
         float t = hit_t[r*Npulse+p];  //distance to hit (misses t=1001.0)
         float i = hit_fnorm[r*Npulse+p]; //dot product between beam direction and primitive normal
         
+        // if( pulse_scangrid_ij.at(r).y*Ntheta+pulse_scangrid_ij.at(r).x ==  boi)
+        // {
         // if(tc < 30)
         // {
         //   std::cout << i << ", ";
@@ -6723,6 +6728,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
         //   tc = 0;
         // }
         // 
+        // }
         
         float ID = float(hit_ID[r*Npulse+p]);   //ID of intersected primitive
         
@@ -6733,7 +6739,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
         
       }
     
-      if( t_pulse.size()==1 ){ //this is discrete-return data, or we only had one hit for this pulse
+      if( t_pulse.size()==1 ){ //this is discrete-return data, or we only had one (ray) hit for this pulse
         
         float distance = t_pulse.front().at(0);
         float intensity = t_pulse.front().at(1);
@@ -6755,7 +6761,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
        for( size_t hit=0; hit<t_pulse.size(); hit++ ){
          float d=t_pulse.at(hit).at(0);
          float f=t_pulse.at(hit).at(1);
-         
+         // loop over bins
          for(uint hh=0;hh<(histogram_values_count.size()-1);hh++)
          {
   
@@ -6777,32 +6783,39 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
          }
        }
 
-       // // print out the counts histogram values
-       // int tc2 = 0;
-       // int zero_count = 0;
-       // std::cout << "histogram_values_count" << std::endl;
-       // for(uint hh=0;hh<(histogram_values_intensity.size());hh++)
+       // if( pulse_scangrid_ij.at(r).y*Ntheta+pulse_scangrid_ij.at(r).x ==  boi)
        // {
-       //   if(histogram_values_count.at(hh) > 0)
-       //   {
-       //         if((histogram_values_count.at(hh-1) == 0 || hh == 0))
-       //         {
-       //           std::cout << "|| " << zero_count << " bins with zero ||, ";
-       //         }
-       // 
-       //         if(tc2 < 60)
-       //         {
-       //           std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], ";
-       //           tc2++;
-       //         }else{
-       //           std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], "  << std::endl;
-       //           tc2 = 0;
-       //         }
-       // 
-       //   }else{
-       //         zero_count++;
-       //    }
+         // print out the counts histogram values
+         int tc2 = 0;
+         int zero_count = 0;
+         std::cout << "histogram_values_count" << std::endl;
+         for(uint hh=0;hh<(histogram_values_intensity.size());hh++)
+         {
+           if(histogram_values_count.at(hh) > 0 )
+           {
+                 if((histogram_values_count.at(hh-1) == 0 || hh == 0))
+                 {
+                   std::cout << "|| " << zero_count << " bins with zero ||, ";
+                 }
+
+                 if(tc2 < 60)
+                 {
+                   std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], ";
+                   tc2++;
+                 }else{
+                   std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], "  << std::endl;
+                   tc2 = 0;
+                 }
+
+           }else{
+                 zero_count++;
+            }
+         }
+
+         std::cout << histogram_values_intensity.at(last_bin_index) << "(" << histogram_values_count.at(last_bin_index) << ")[" << last_bin_index << "], ";
+
        // }
+ 
        
        //check for a full miss before doing any peak finding
        if(histogram_values_count.at(last_bin_index) == Npulse)
@@ -6813,29 +6826,33 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
          float IDmap = -99999;
          std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
          t_hit_initial.push_back( v );
-       }else{
          
+       }else{
+
        // find peaks in the histogram
        // these are the indices of histogram_values_intensity
        std::vector<uint> peaks = peakFinder(histogram_values_intensity);
        
-       // std::cout << std::endl;
-       // std::cout << "peaks.size() = " << peaks.size() << std::endl;
-       // std::cout << "peaks intensity (count) [index] :" << std::endl;
-       // for(uint pk = 0;pk<peaks.size();pk++)
+       // if( pulse_scangrid_ij.at(r).y*Ntheta+pulse_scangrid_ij.at(r).x ==  boi)
        // {
-       //   std::cout << histogram_values_intensity.at(peaks.at(pk)) << "(" << histogram_values_count.at(peaks.at(pk)) << ")[" << peaks.at(pk) << "], ";
-       // }
+       std::cout << std::endl;
+       std::cout << "peaks.size() = " << peaks.size() << std::endl;
+       std::cout << "peaks intensity (count) [index] :" << std::endl;
+       for(uint pk = 0;pk<peaks.size();pk++)
+       {
+         std::cout << histogram_values_intensity.at(peaks.at(pk)) << "(" << histogram_values_count.at(peaks.at(pk)) << ")[" << peaks.at(pk) << "], ";
+       }
 
        // std::cout << std::endl;
        // std::cout << "histogram_values_intensity.size() = " << histogram_values_intensity.size() << std::endl;
        // // std::cout << "max = " << max(histogram_values_intensity) << std::endl;
        // double max = *max_element(histogram_values_intensity.begin(), histogram_values_intensity.end());
        // std::cout<<"Max value: "<<max<<std::endl;
-       // 
+       //
        // double maxc = *max_element(histogram_values_count.begin(), histogram_values_count.end());
        // std::cout<<"Max count: "<<maxc<<std::endl;
-       // 
+       // }
+       
        //if there is only one peak, just sum all histogram bars and put it at the peak location
        // else find the minimum values between peaks and use those as the dividers to decide which bars get summed into which peak
        if(peaks.size() == 1)
@@ -6843,7 +6860,7 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
          
          float hp_intensity = 0;
          int hp_raycount = 0;
-         for(uint iii=0;iii < histogram_values_intensity.size();iii++)
+         for(uint iii=0;iii < (histogram_values_intensity.size() - 1);iii++)
          {
            hp_intensity = hp_intensity +  histogram_values_intensity.at(iii);
            hp_raycount = hp_raycount +  histogram_values_count.at(iii);
@@ -6855,6 +6872,16 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
          float IDmap = histogram_values_UUID.at(peaks.at(0));
          std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
          t_hit_initial.push_back( v );
+         
+         if(histogram_values_count.at(last_bin_index) > 0)
+         { 
+           float distance = miss_distance;
+           float intensity = 0.0;
+           float nPulseHit = histogram_values_count.at(last_bin_index);
+           float IDmap = -99999;
+           std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+           t_hit_initial.push_back( v );
+         }
          
        }else if(peaks.size() > 1){
          
@@ -6932,25 +6959,9 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
            std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(3)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
            t_hit_initial.push_back( v );
          }
-         
-         
-         // // add the last bin to catch misses
-         // float distance = max_distance;
-         // float intensity = 0.0;
-         // float nPulseHit = float(histogram_values_count.at(last_bin_index));
-         // float IDmap = -999999;
-         // std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
-         // t_hit_initial.push_back( v );
-         
        }
-       
       }
-
-      }
-       
-      // float d0 = t_hit_initial.at(0).at(0);
-      // float f0 = t_hit_initial.at(0).at(1);
-      // float nr = float(t_hit_initial.at(0).at(2));
+    }
       
       t_hit = t_hit_initial;
       
@@ -7562,7 +7573,7 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
           
           float hp_intensity = 0;
           int hp_raycount = 0;
-          for(uint iii=0;iii < histogram_values_intensity.size();iii++)
+          for(uint iii=0;iii < (histogram_values_intensity.size() - 1);iii++)
           {
             hp_intensity = hp_intensity +  histogram_values_intensity.at(iii);
             hp_raycount = hp_raycount +  histogram_values_count.at(iii);
@@ -7575,6 +7586,16 @@ void LiDARcloud::syntheticScan_histogram_Tpd( helios::Context* context, int rays
           float IDmap = histogram_values_UUID.at(peaks.at(0));
           std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
           t_hit_initial.push_back( v );
+          
+          if(histogram_values_count.at(last_bin_index) > 0)
+          { 
+            float distance = miss_distance;
+            float intensity = 0.0;
+            float nPulseHit = histogram_values_count.at(last_bin_index);
+            float IDmap = -99999;
+            std::vector<float> v{distance, intensity, nPulseHit, IDmap}; //Note: the last index of t_pulse (.at(2)) is the object identifier. We don't want object identifiers to be averaged, so we'll assign the hit identifier based on the last ray in the group
+            t_hit_initial.push_back( v );
+          }
           
         }else if(peaks.size() > 1){
           
