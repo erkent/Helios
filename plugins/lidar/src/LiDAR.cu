@@ -6783,38 +6783,38 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
          }
        }
 
-       // if( pulse_scangrid_ij.at(r).y*Ntheta+pulse_scangrid_ij.at(r).x ==  boi)
-       // {
-         // print out the counts histogram values
-         int tc2 = 0;
-         int zero_count = 0;
-         std::cout << "histogram_values_count" << std::endl;
-         for(uint hh=0;hh<(histogram_values_intensity.size());hh++)
-         {
-           if(histogram_values_count.at(hh) > 0 )
-           {
-                 if((histogram_values_count.at(hh-1) == 0 || hh == 0))
-                 {
-                   std::cout << "|| " << zero_count << " bins with zero ||, ";
-                 }
-
-                 if(tc2 < 60)
-                 {
-                   std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], ";
-                   tc2++;
-                 }else{
-                   std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], "  << std::endl;
-                   tc2 = 0;
-                 }
-
-           }else{
-                 zero_count++;
-            }
-         }
-
-         std::cout << histogram_values_intensity.at(last_bin_index) << "(" << histogram_values_count.at(last_bin_index) << ")[" << last_bin_index << "], ";
-
-       // }
+       // // if( pulse_scangrid_ij.at(r).y*Ntheta+pulse_scangrid_ij.at(r).x ==  boi)
+       // // {
+       //   // print out the counts histogram values
+       //   int tc2 = 0;
+       //   int zero_count = 0;
+       //   std::cout << "histogram_values_count" << std::endl;
+       //   for(uint hh=0;hh<(histogram_values_intensity.size());hh++)
+       //   {
+       //     if(histogram_values_count.at(hh) > 0 )
+       //     {
+       //           if((histogram_values_count.at(hh-1) == 0 || hh == 0))
+       //           {
+       //             std::cout << "|| " << zero_count << " bins with zero ||, ";
+       //           }
+       // 
+       //           if(tc2 < 60)
+       //           {
+       //             std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], ";
+       //             tc2++;
+       //           }else{
+       //             std::cout << histogram_values_intensity.at(hh) << "(" << histogram_values_count.at(hh) << ")[" << hh << "], "  << std::endl;
+       //             tc2 = 0;
+       //           }
+       // 
+       //     }else{
+       //           zero_count++;
+       //      }
+       //   }
+       // 
+       //   std::cout << histogram_values_intensity.at(last_bin_index) << "(" << histogram_values_count.at(last_bin_index) << ")[" << last_bin_index << "], ";
+       // 
+       // // }
  
        
        //check for a full miss before doing any peak finding
@@ -6835,13 +6835,13 @@ void LiDARcloud::syntheticScan_histogram( helios::Context* context, int rays_per
        
        // if( pulse_scangrid_ij.at(r).y*Ntheta+pulse_scangrid_ij.at(r).x ==  boi)
        // {
-       std::cout << std::endl;
-       std::cout << "peaks.size() = " << peaks.size() << std::endl;
-       std::cout << "peaks intensity (count) [index] :" << std::endl;
-       for(uint pk = 0;pk<peaks.size();pk++)
-       {
-         std::cout << histogram_values_intensity.at(peaks.at(pk)) << "(" << histogram_values_count.at(peaks.at(pk)) << ")[" << peaks.at(pk) << "], ";
-       }
+       // std::cout << std::endl;
+       // std::cout << "peaks.size() = " << peaks.size() << std::endl;
+       // std::cout << "peaks intensity (count) [index] :" << std::endl;
+       // for(uint pk = 0;pk<peaks.size();pk++)
+       // {
+       //   std::cout << histogram_values_intensity.at(peaks.at(pk)) << "(" << histogram_values_count.at(peaks.at(pk)) << ")[" << peaks.at(pk) << "], ";
+       // }
 
        // std::cout << std::endl;
        // std::cout << "histogram_values_intensity.size() = " << histogram_values_intensity.size() << std::endl;
